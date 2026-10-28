@@ -138,7 +138,8 @@ fun SettingsScreen(container: AppContainer, bottomInset: Dp, onRequestNotificati
                     Spacer(Modifier.size(12.dp))
                     Column {
                         Text("Woody", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
-                        Text("Ежедневник · версия 1.0", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                        val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+                        Text("Ежедневник · версия $version", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                     }
                 }
             }
