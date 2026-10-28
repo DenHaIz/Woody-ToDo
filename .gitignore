@@ -1,0 +1,9 @@
+.toolchain/
+.gradle/
+.kotlin/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+env.ps1
