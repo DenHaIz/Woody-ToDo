@@ -10,6 +10,12 @@
 
 **EN** — A simple daily planner for Android: daily tasks, repeats, checklists and reminders. Smooth animations, glass effect, no battery drain in the background. Android 12+.
 
+## Установка / Install
+
+**RU** — Скачайте APK из [Releases](https://github.com/DenHaIz/Woody-ToDo/releases/latest) и установите на телефон.
+
+**EN** — Download the APK from [Releases](https://github.com/DenHaIz/Woody-ToDo/releases/latest) and install it on your phone.
+
 ## Сборка / Build
 
 ```powershell
@@ -17,3 +23,5 @@
 ```
 
 APK: `app/build/outputs/apk/release/app-release.apk`
+
+Для разработчиков / For developers: [HANDOFF.md](HANDOFF.md)

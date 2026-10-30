@@ -8,3 +8,4 @@ local.properties
 captures/
 env.ps1
 .claude/
+tools/pixel.html
