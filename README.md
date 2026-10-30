@@ -16,6 +16,10 @@
 
 **EN** — Download the APK from [Releases](https://github.com/DenHaIz/Woody-ToDo/releases/latest) and install it on your phone.
 
+**RU** — Если напоминания не приходят: Настройки (удержите «+») → «Проверить напоминание».
+
+**EN** — If reminders don't arrive: Settings (hold "+") → "Проверить напоминание" (test reminder).
+
 ## Сборка / Build
 
 ```powershell
