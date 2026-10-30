@@ -2,7 +2,7 @@ package com.woody.planner.ui.components
 
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -29,12 +29,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.woody.planner.ui.glass.liquidGlass
@@ -71,10 +78,51 @@ fun GlassSheet(
             fadeIn(Motion.snappy()),
         exit = slideOutVertically(Motion.soft()) { it } + fadeOut(Motion.snappy()),
     ) {
-        val drag = remember { Animatable(0f) }
+        // Сдвиг листа вниз пальцем; анимация — только при отпускании.
+        var drag by remember { mutableFloatStateOf(0f) }
         var backProgress by remember { mutableFloatStateOf(0f) }
         val scope = rememberCoroutineScope()
-        val dismissDistance = with(LocalDensity.current) { 120.dp.toPx() }
+        val dismissDistance = with(LocalDensity.current) { 110.dp.toPx() }
+        val currentDismiss by rememberUpdatedState(onDismiss)
+
+        fun settle(velocity: Float) {
+            if (drag > dismissDistance || velocity > 1600f) {
+                currentDismiss()
+            } else {
+                scope.launch { animate(drag, 0f, animationSpec = Motion.bouncy()) { v, _ -> drag = v } }
+            }
+        }
+
+        // Тянуть вниз можно за любое место: пока содержимое не у верха — оно прокручивается,
+        // дальше жест «перетекает» в сдвиг всего листа.
+        val nestedScroll = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y < 0f && drag > 0f) {
+                        val used = maxOf(available.y, -drag)
+                        drag += used
+                        return Offset(0f, used)
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y > 0f && source == NestedScrollSource.UserInput) {
+                        drag += available.y
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (drag > 0f) {
+                        settle(available.y)
+                        return available
+                    }
+                    return Velocity.Zero
+                }
+            }
+        }
 
         PredictiveBackHandler(enabled = visible) { events ->
             try {
@@ -100,7 +148,7 @@ fun GlassSheet(
                     .navigationBarsPadding()
                     .padding(bottom = 8.dp)
                     .graphicsLayer {
-                        translationY = drag.value
+                        translationY = drag
                         val s = 1f - backProgress * 0.08f
                         scaleX = s
                         scaleY = s
@@ -108,26 +156,26 @@ fun GlassSheet(
                     }
                     .heightIn(max = maxSheetHeight)
                     .fillMaxWidth()
-                    .liquidGlass(Shapes.Sheet, tint = colors.background.copy(alpha = if (colors.isDark) 0.62f else 0.55f))
-                    .clickable(interactionSource = null, indication = null) { /* не пропускать тапы к фону */ },
+                    .liquidGlass(Shapes.Sheet, tint = colors.background.copy(alpha = if (colors.isDark) 0.74f else 0.66f))
+                    .clickable(interactionSource = null, indication = null) { /* не пропускать тапы к фону */ }
+                    .nestedScroll(nestedScroll)
+                    // Участки без прокрутки (ручка, заголовок) тоже тянут лист.
+                    .pointerInput(Unit) {
+                        val tracker = VelocityTracker()
+                        detectVerticalDragGestures(
+                            onDragStart = { tracker.resetTracking() },
+                            onDragEnd = { settle(tracker.calculateVelocity().y) },
+                            onDragCancel = { settle(0f) },
+                        ) { change, dy ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            change.consume()
+                            drag = (drag + dy).coerceAtLeast(0f)
+                        }
+                    },
             ) {
-                // Ручка: тянем вниз — лист следует за пальцем, отпускаем — закрывается или пружинит обратно.
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onDragEnd = {
-                                    scope.launch {
-                                        if (drag.value > dismissDistance) onDismiss() else drag.animateTo(0f, Motion.bouncy())
-                                    }
-                                },
-                                onDragCancel = { scope.launch { drag.animateTo(0f, Motion.bouncy()) } },
-                            ) { change, dy ->
-                                change.consume()
-                                scope.launch { drag.snapTo((drag.value + dy).coerceAtLeast(0f)) }
-                            }
-                        }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center,
                 ) {

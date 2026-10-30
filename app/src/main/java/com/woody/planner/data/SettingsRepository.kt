@@ -14,7 +14,7 @@ enum class ThemeMode { System, Light, Dark }
 enum class SwipeStyle(val title: String, val description: String) {
     Classic("Классика", "Подложка проявляется под карточкой"),
     Liquid("Капля", "Цвет вытекает из края жидкой каплей"),
-    Depth("Объём", "Карточка поворачивается в 3D, выполнение — салют"),
+    Book("Книжка", "Карточка перелистывается, как страница"),
 }
 
 private val Context.dataStore by preferencesDataStore(name = "settings")

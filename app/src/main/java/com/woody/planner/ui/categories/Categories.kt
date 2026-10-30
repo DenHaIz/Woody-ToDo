@@ -22,7 +22,9 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -110,7 +112,12 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
     var draft by remember(initial) { mutableStateOf(initial) }
     val accent by animateColorAsState(Color(draft.colorArgb), Motion.snappy(), label = "catColor")
 
-    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 16.dp)) {
+    Column(
+        Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 16.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier

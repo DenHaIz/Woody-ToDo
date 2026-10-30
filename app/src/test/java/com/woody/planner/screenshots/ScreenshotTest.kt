@@ -150,27 +150,54 @@ class ScreenshotTest {
     }
 
     @Test
-    fun fabMenuAndSettings() {
+    fun settingsByLongPress() {
         seed()
         render(dark = false)
-        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick(durationMillis = 900) }
-        compose.waitForIdle()
-        shot("fab_menu")
-        compose.onNodeWithText("Настройки").performClick()
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
         compose.waitForIdle()
         shot("settings_light")
     }
 
     @Test
-    fun settingsDark() {
+    fun editorDark() {
         seed()
         render(dark = true)
-        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick(durationMillis = 900) }
+        compose.onNodeWithContentDescription("Добавить").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Категории").performClick()
-        compose.waitForIdle()
-        shot("settings_dark_categories")
+        shot("editor_dark")
     }
+
+    /** Покадрово: палец тянет карточку, отпускает, анимация доигрывает. */
+    private fun swipeFrames(style: SwipeStyle, name: String) {
+        runBlocking { container.settings.setSwipeStyle(style) }
+        seed()
+        render(dark = false)
+        compose.mainClock.autoAdvance = false
+        val node = compose.onNodeWithText("Купить курицу")
+        node.performTouchInput { down(androidx.compose.ui.geometry.Offset(left + 40f, centerY)) }
+        repeat(12) {
+            node.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(width * 0.05f, 0f)) }
+            compose.mainClock.advanceTimeBy(16)
+        }
+        shot("${name}_1_drag")
+        node.performTouchInput { up() }
+        compose.mainClock.advanceTimeBy(64)
+        shot("${name}_2_release")
+        compose.mainClock.advanceTimeBy(200)
+        shot("${name}_3_settle")
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        shot("${name}_4_done")
+    }
+
+    @Test
+    fun swipeFramesClassic() = swipeFrames(SwipeStyle.Classic, "frames_classic")
+
+    @Test
+    fun swipeFramesLiquid() = swipeFrames(SwipeStyle.Liquid, "frames_liquid")
+
+    @Test
+    fun swipeFramesBook() = swipeFrames(SwipeStyle.Book, "frames_book")
 
     @Test
     fun emptyDayDark() {

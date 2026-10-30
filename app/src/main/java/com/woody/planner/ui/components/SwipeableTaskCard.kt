@@ -1,9 +1,10 @@
 package com.woody.planner.ui.components
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
@@ -30,15 +31,14 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -49,18 +49,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.woody.planner.data.SwipeStyle
-import com.woody.planner.ui.theme.Brand
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.WoodyTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.sign
-import kotlin.math.sin
-import kotlin.random.Random
 
 /** Выбранная в настройках анимация свайпа. */
 val LocalSwipeStyle = staticCompositionLocalOf { SwipeStyle.Classic }
@@ -69,16 +64,20 @@ data class SwipeAction(
     val icon: ImageVector,
     val label: String,
     val color: Color,
-    /** true — карточка улетает за край (задача уходит из списка), false — возвращается на место. */
+    /** true — карточка уходит (задача пропадает из списка), false — возвращается на место. */
     val dismiss: Boolean,
     val onTrigger: () -> Unit,
 )
 
 private val CardShape = RoundedCornerShape(24.dp)
 
+/** Доля ширины, на которой страница «Книжки» встаёт ребром (90°). */
+private const val BookTurnFraction = 0.6f
+
 /**
- * Карточка со свайпами в обе стороны. Жест общий, а отрисовка зависит от [LocalSwipeStyle]:
- * классическая подложка, жидкая капля или 3D-поворот с салютом.
+ * Карточка со свайпами в обе стороны. Жест общий, отрисовка зависит от [style]:
+ * «Классика» — подложка под уезжающей карточкой; «Капля» — цвет вытекает жидкой каплей;
+ * «Книжка» — карточка перелистывается вокруг дальнего края, как страница.
  * [previewOffset] фиксирует сдвиг (доля порога) — для превью и скриншотов.
  */
 @Composable
@@ -96,19 +95,18 @@ fun SwipeableTaskCard(
     val haptics = LocalHapticFeedback.current
     val start by rememberUpdatedState(startAction)
     val end by rememberUpdatedState(endAction)
+    val underlay = WoodyTheme.colors.background
 
     var width by remember { mutableIntStateOf(0) }
-    // Живой сдвиг пальцем — обычное состояние без корутин на каждое событие.
+    // Живой сдвиг пальцем — обычное состояние, без корутины на каждое событие.
     var drag by remember { mutableFloatStateOf(0f) }
     val offset = { previewOffset?.let { it * threshold } ?: drag }
-    val burst = remember { Animatable(0f) }
-    val underlay = WoodyTheme.colors.background
     val splash = remember { Animatable(0f) }
-    var burstColor by remember { mutableStateOf(Color.Transparent) }
+    var splashColor by remember { mutableStateOf(Color.Transparent) }
     var splashFromStart by remember { mutableStateOf(true) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
 
-    fun animateTo(target: Float, spec: androidx.compose.animation.core.AnimationSpec<Float>, after: suspend () -> Unit = {}) {
+    fun settleTo(target: Float, spec: AnimationSpec<Float>, after: suspend () -> Unit = {}) {
         settleJob?.cancel()
         settleJob = scope.launch {
             animate(drag, target, animationSpec = spec) { value, _ -> drag = value }
@@ -121,11 +119,12 @@ fun SwipeableTaskCard(
             .onSizeChanged { width = it.width }
             .drawWithContent {
                 drawContent()
-                // Салют (стиль «Объём») и всплеск (стиль «Капля») — поверх карточки.
-                if (burst.value in 0.001f..0.999f) drawBurst(burst.value, burstColor)
-                if (splash.value in 0.001f..0.999f) clipPath(Path().apply {
-                    addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(24.dp.toPx())))
-                }) { drawSplash(splash.value, burstColor, splashFromStart) }
+                // Всплеск «Капли» после срабатывания — световая волна по карточке.
+                if (splash.value in 0.001f..0.999f) {
+                    clipPath(Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(24.dp.toPx()))) }) {
+                        drawSplash(splash.value, splashColor, splashFromStart)
+                    }
+                }
             },
     ) {
         // Подложка с действием
@@ -146,51 +145,55 @@ fun SwipeableTaskCard(
                             )
                         }
                         SwipeStyle.Liquid -> drawOutsideCard(v) { drawLiquid(v, p, action.color) }
-                        SwipeStyle.Depth -> drawDepthBackdrop(v, p, action.color)
+                        SwipeStyle.Book -> drawBookBackdrop(v, p, action.color)
                     }
                 },
         ) {
-            start?.let { action ->
-                ActionHint(action, style, threshold, Alignment.Start) { offset() }
-            }
-            end?.let { action ->
-                ActionHint(action, style, threshold, Alignment.End) { offset() }
-            }
+            start?.let { ActionHint(it, style, threshold, Side.Start) { offset() } }
+            end?.let { ActionHint(it, style, threshold, Side.End) { offset() } }
         }
 
         Box(
             Modifier
                 .graphicsLayer {
                     val v = offset()
-                    val p = (abs(v) / threshold).coerceIn(0f, 1.5f)
                     when (style) {
                         SwipeStyle.Classic -> translationX = v
                         SwipeStyle.Liquid -> {
                             translationX = v
                             // Карточка чуть «сплющивается», будто её толкает жидкость.
-                            scaleY = 1f - 0.025f * p.coerceAtMost(1f)
+                            scaleY = 1f - 0.025f * (abs(v) / threshold).coerceIn(0f, 1f)
                         }
-                        SwipeStyle.Depth -> {
-                            val w = max(size.width, 1f)
-                            translationX = v * 0.92f
-                            cameraDistance = 14f * density.density
-                            transformOrigin = TransformOrigin(if (v > 0) 1f else 0f, 0.5f)
-                            rotationY = -(v / w) * 38f
-                            val s = 1f - 0.05f * p.coerceAtMost(1f)
-                            scaleX = s
-                            scaleY = s
-                            shadowElevation = 14.dp.toPx() * p.coerceAtMost(1f)
-                            shape = CardShape
-                            clip = false
-                            alpha = 1f - ((abs(v) - w * 0.6f) / (w * 0.6f)).coerceIn(0f, 1f)
+                        SwipeStyle.Book -> {
+                            // Петля — у дальнего края: тянем вправо — лист переворачивается вокруг правого края.
+                            val turn = bookTurn(v, size.width)
+                            transformOrigin = TransformOrigin(if (v >= 0) 1f else 0f, 0.5f)
+                            cameraDistance = 24f * density.density
+                            rotationY = if (v >= 0) turn * 90f else -turn * 90f
                         }
                     }
                 }
-                .drawBehind {
-                    // «Объём»: в движении карточка становится плотной, чтобы подложка не просвечивала сквозь 3D-поворот.
-                    if (style == SwipeStyle.Depth) {
-                        val a = (abs(offset()) / threshold * 4f).coerceIn(0f, 1f)
-                        if (a > 0f) drawRoundRect(underlay.copy(alpha = a), cornerRadius = CornerRadius(24.dp.toPx()))
+                .drawWithContent {
+                    val v = offset()
+                    if (style == SwipeStyle.Book && v != 0f) {
+                        val turn = bookTurn(v, size.width)
+                        // Плотная подложка, чтобы при повороте сквозь карточку не просвечивал цвет действия.
+                        drawRoundRect(underlay.copy(alpha = (turn * 6f).coerceIn(0f, 1f)), cornerRadius = CornerRadius(24.dp.toPx()))
+                        drawContent()
+                        // Тень сгиба: темнее у свободного края страницы.
+                        val freeEdgeAtStart = v > 0
+                        drawRoundRect(
+                            brush = Brush.horizontalGradient(
+                                colors = if (freeEdgeAtStart) {
+                                    listOf(Color.Black.copy(alpha = 0.16f * turn), Color.Transparent)
+                                } else {
+                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.16f * turn))
+                                },
+                            ),
+                            cornerRadius = CornerRadius(24.dp.toPx()),
+                        )
+                    } else {
+                        drawContent()
                     }
                 }
                 .pointerInput(style) {
@@ -205,40 +208,35 @@ fun SwipeableTaskCard(
                             val v = drag
                             val action = if (v > 0) start else end
                             if (action == null || abs(v) < threshold) {
-                                animateTo(0f, Motion.bouncy())
+                                settleTo(0f, Motion.bouncy())
                                 return@detectHorizontalDragGestures
                             }
                             val direction = sign(v)
-                            if (style == SwipeStyle.Depth && !action.dismiss) {
-                                burstColor = action.color
-                                scope.launch {
-                                    burst.snapTo(0f)
-                                    burst.animateTo(1f, tween(720, easing = FastOutSlowInEasing))
-                                }
-                            }
-                            if (style == SwipeStyle.Liquid && !action.dismiss) {
-                                burstColor = action.color
-                                splashFromStart = v > 0
-                                scope.launch {
-                                    splash.snapTo(0f)
-                                    splash.animateTo(1f, tween(460, easing = FastOutSlowInEasing))
-                                    splash.snapTo(0f)
-                                }
-                            }
                             if (action.dismiss) {
-                                val target = direction * width * if (style == SwipeStyle.Depth) 1.25f else 1f
-                                animateTo(target, Motion.snappy()) {
+                                val target = direction * width * if (style == SwipeStyle.Book) BookTurnFraction else 1f
+                                settleTo(target, Motion.snappy()) {
                                     action.onTrigger()
                                     // Если элемент остался в списке (например, после отмены) — вернём его на место.
-                                    delay(700)
+                                    delay(600)
                                     drag = 0f
                                 }
                             } else {
+                                if (style == SwipeStyle.Liquid) {
+                                    splashColor = action.color
+                                    splashFromStart = v > 0
+                                    scope.launch {
+                                        splash.snapTo(0f)
+                                        splash.animateTo(1f, tween(460, easing = FastOutSlowInEasing))
+                                        splash.snapTo(0f)
+                                    }
+                                }
                                 action.onTrigger()
-                                animateTo(0f, Motion.bouncy())
+                                // «Книжка» шлёпается обратно с лёгким отскоком, остальные — пружиной.
+                                val spec = if (style == SwipeStyle.Book) spring<Float>(dampingRatio = 0.45f, stiffness = 380f) else Motion.bouncy()
+                                settleTo(0f, spec)
                             }
                         },
-                        onDragCancel = { animateTo(0f, Motion.bouncy()) },
+                        onDragCancel = { settleTo(0f, Motion.bouncy()) },
                     ) { change, dragAmount ->
                         change.consume()
                         val current = drag
@@ -249,7 +247,12 @@ fun SwipeableTaskCard(
                             abs(current) > threshold -> 0.35f
                             else -> 1f
                         }
-                        val next = current + dragAmount * resistance
+                        var next = current + dragAmount * resistance
+                        // Страница не переворачивается дальше, чем «ребром».
+                        if (style == SwipeStyle.Book) {
+                            val limit = width * BookTurnFraction * 0.92f
+                            next = next.coerceIn(-limit, limit)
+                        }
                         val nowArmed = available != null && abs(next) >= threshold
                         if (nowArmed != armed) {
                             armed = nowArmed
@@ -266,15 +269,19 @@ fun SwipeableTaskCard(
     }
 }
 
-private enum class Alignment { Start, End }
+/** Доля переворота страницы 0..1 (1 — ребром). */
+private fun bookTurn(v: Float, width: Float): Float =
+    (abs(v) / (width.coerceAtLeast(1f) * BookTurnFraction)).coerceIn(0f, 1f)
 
-/** Иконка действия на подложке. Положение и масштаб зависят от стиля. */
+private enum class Side { Start, End }
+
+/** Иконка действия на подложке. Трансформации — на самой иконке, вокруг её центра. */
 @Composable
 private fun ActionHint(
     action: SwipeAction,
     style: SwipeStyle,
     threshold: Float,
-    side: Alignment,
+    side: Side,
     offset: () -> Float,
 ) {
     val density = LocalDensity.current
@@ -290,10 +297,10 @@ private fun ActionHint(
     ) { measurables, constraints ->
         val placeable = measurables.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
         layout(constraints.maxWidth, constraints.maxHeight) {
-            val x = if (side == Alignment.Start) edge.toInt() else constraints.maxWidth - edge.toInt() - placeable.width
+            val x = if (side == Side.Start) edge.toInt() else constraints.maxWidth - edge.toInt() - placeable.width
             placeable.placeWithLayer(x, (constraints.maxHeight - placeable.height) / 2) {
                 val raw = offset()
-                val v = if (side == Alignment.Start) raw else -raw
+                val v = if (side == Side.Start) raw else -raw
                 val p = (v / threshold).coerceIn(0f, 1.3f)
                 alpha = (p * 1.4f).coerceIn(0f, 1f)
                 val pop = if (p >= 1f) 0.1f else 0f
@@ -306,19 +313,17 @@ private fun ActionHint(
                     SwipeStyle.Liquid -> {
                         // Иконка «плывёт» в центре капли.
                         val shift = (v / 2f - edge - iconHalf).coerceAtLeast(0f)
-                        translationX = if (side == Alignment.Start) shift else -shift
+                        translationX = if (side == Side.Start) shift else -shift
                         val s = 0.5f + 0.5f * p.coerceAtMost(1f) + pop * 1.5f
                         scaleX = s
                         scaleY = s
                     }
-                    SwipeStyle.Depth -> {
-                        // Параллакс и докрутка иконки на место.
-                        val shift = v * 0.18f
-                        translationX = if (side == Alignment.Start) shift else -shift
-                        rotationZ = (1f - p.coerceAtMost(1f)) * if (side == Alignment.Start) -120f else 120f
+                    SwipeStyle.Book -> {
+                        // Иконка «выглядывает» из-под поднимающейся страницы.
                         val s = 0.7f + 0.3f * p.coerceAtMost(1f) + pop
                         scaleX = s
                         scaleY = s
+                        translationX = (1f - p.coerceAtMost(1f)) * if (side == Side.Start) -edge else edge
                     }
                 }
             }
@@ -328,16 +333,11 @@ private fun ActionHint(
 
 /**
  * Рисует [block] строго вне сдвинутой карточки: карточки полупрозрачные, и подложка
- * не должна просвечивать сквозь них. [scale] — масштаб карточки (стиль «Объём»).
+ * не должна просвечивать сквозь них.
  */
-private inline fun DrawScope.drawOutsideCard(v: Float, scale: Float = 1f, block: DrawScope.() -> Unit) {
-    val w = size.width * scale
-    val h = size.height * scale
-    val left = v + (size.width - w) / 2f
-    val top = (size.height - h) / 2f
-    val radius = 24.dp.toPx() * scale
+private inline fun DrawScope.drawOutsideCard(v: Float, block: DrawScope.() -> Unit) {
     val card = Path().apply {
-        addRoundRect(RoundRect(left, top, left + w, top + h, CornerRadius(radius)))
+        addRoundRect(RoundRect(v, 0f, v + size.width, size.height, CornerRadius(24.dp.toPx())))
     }
     clipPath(card, ClipOp.Difference) { block() }
 }
@@ -366,49 +366,24 @@ private fun DrawScope.drawSplash(progress: Float, color: Color, fromStart: Boole
     val radius = size.width * 1.1f * progress
     val fade = 1f - progress
     drawCircle(color.copy(alpha = 0.18f * fade), radius = radius, center = center)
-    drawCircle(
-        color.copy(alpha = 0.7f * fade),
-        radius = radius,
-        center = center,
-        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 10.dp.toPx() * fade + 1f),
-    )
+    drawCircle(color.copy(alpha = 0.7f * fade), radius = radius, center = center, style = Stroke(width = 10.dp.toPx() * fade + 1f))
 }
 
-/** Глубокая подложка: градиент от края и мягкая «тень» за поворачивающейся карточкой. */
-private fun DrawScope.drawDepthBackdrop(v: Float, p: Float, color: Color) {
-    val fill = p.coerceAtMost(1f)
-    val fromStart = v > 0
-    val brush = Brush.horizontalGradient(
-        colors = if (fromStart) {
-            listOf(color, color.copy(alpha = 0.55f * fill + 0.2f))
-        } else {
-            listOf(color.copy(alpha = 0.55f * fill + 0.2f), color)
-        },
+/** Подложка «Книжки»: цвет действия с мягкой тенью от поднимающейся страницы у петли. */
+private fun DrawScope.drawBookBackdrop(v: Float, p: Float, color: Color) {
+    val turn = bookTurn(v, size.width)
+    drawRoundRect(color.copy(alpha = 0.35f + 0.65f * p.coerceAtMost(1f)), cornerRadius = CornerRadius(24.dp.toPx()))
+    val hingeAtEnd = v > 0
+    val shadowWidth = size.width * 0.35f
+    drawRect(
+        brush = Brush.horizontalGradient(
+            colors = if (hingeAtEnd) {
+                listOf(Color.Transparent, Color.Black.copy(alpha = 0.14f * turn))
+            } else {
+                listOf(Color.Black.copy(alpha = 0.14f * turn), Color.Transparent)
+            },
+            startX = if (hingeAtEnd) size.width - shadowWidth else 0f,
+            endX = if (hingeAtEnd) size.width else shadowWidth,
+        ),
     )
-    drawRoundRect(brush, alpha = 0.35f + 0.65f * fill, cornerRadius = CornerRadius(24.dp.toPx()))
-}
-
-/** Салют из частиц от чекбокса при выполнении задачи. */
-private fun DrawScope.drawBurst(progress: Float, color: Color) {
-    val origin = Offset(34.dp.toPx(), size.height / 2f)
-    val random = Random(42)
-    val palette = listOf(color, Brand.Amber, Brand.Crimson, Brand.Blue, Color.White)
-    val travel = 120.dp.toPx()
-    repeat(22) { i ->
-        val angle = (i / 22f) * 6.283f + random.nextFloat() * 0.4f
-        val speed = 0.45f + random.nextFloat() * 0.55f
-        val d = travel * speed * progress
-        // Лёгкая «гравитация» — частицы опускаются к концу полёта.
-        val center = Offset(origin.x + cos(angle) * d, origin.y + sin(angle) * d * 0.6f + 40.dp.toPx() * progress * progress)
-        val alpha = (1f - progress).coerceIn(0f, 1f)
-        val c = palette[i % palette.size].copy(alpha = alpha)
-        val r = (2.5f + random.nextFloat() * 2.5f).dp.toPx() * (1f - progress * 0.4f)
-        if (i % 3 == 0) {
-            rotate(progress * 540f + i * 20f, center) {
-                drawRect(c, topLeft = Offset(center.x - r, center.y - r * 0.5f), size = Size(r * 2, r))
-            }
-        } else {
-            drawCircle(c, radius = r, center = center)
-        }
-    }
 }

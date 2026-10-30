@@ -2,7 +2,6 @@ package com.woody.planner.ui.glass
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +29,7 @@ val LocalHazeState = staticCompositionLocalOf<HazeState?> { null }
 
 /**
  * Жидкое стекло: размытие + преломление по краям + блики (Haze Glass).
+ * Без «засвета» под пальцем: отклик на нажатие рисуют сами кнопки (мягкий цветной отсвет).
  * На Android 13+ работает на AGSL-шейдере, на Android 12 Haze автоматически
  * переключается на упрощённый вариант с размытием.
  */
@@ -37,7 +37,6 @@ val LocalHazeState = staticCompositionLocalOf<HazeState?> { null }
 fun Modifier.liquidGlass(
     shape: RoundedCornerShape,
     tint: Color = WoodyTheme.colors.glassTint,
-    interactionSource: MutableInteractionSource? = null,
     stroke: Boolean = true,
 ): Modifier {
     val state = LocalHazeState.current
@@ -65,17 +64,12 @@ fun Modifier.liquidGlass(
                 whitePoint(0.55f)
                 chromaMultiplier(1.5f)
             }
-            pressed {
-                scale(0.97f)
-                lightingIntensity(1f)
-            }
         }
     }
     val glass = if (state != null) {
         hazeGlass(
             input = HazeInput.Sources(state),
             style = style,
-            interactionSource = interactionSource,
         )
     } else {
         background(tint.copy(alpha = 0.9f), shape)

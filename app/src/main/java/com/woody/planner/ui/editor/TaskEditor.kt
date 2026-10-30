@@ -275,7 +275,7 @@ private fun EditorContent(
                 Box(
                     Modifier
                         .size(54.dp)
-                        .bouncyClickable { onDelete(initial.id) }
+                        .bouncyClickable(glowColor = colors.accent, glowShape = CircleShape) { onDelete(initial.id) }
                         .clip(CircleShape)
                         .background(colors.accent.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
@@ -293,7 +293,7 @@ private fun EditorContent(
                 Modifier
                     .weight(1f)
                     .height(54.dp)
-                    .bouncyClickable(enabled = enabled) { onSave(draft) }
+                    .bouncyClickable(enabled = enabled, glowColor = Color.White, glowShape = Shapes.Pill) { onSave(draft) }
                     .clip(Shapes.Pill)
                     .background(saveColor),
                 contentAlignment = Alignment.Center,
@@ -407,7 +407,7 @@ private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: 
                                 scaleX = scale.value
                                 scaleY = scale.value
                             }
-                            .bouncyClickable {
+                            .bouncyClickable(glowColor = colors.accent, glowShape = CircleShape) {
                                 val mask = value.daysMask xor day.bit
                                 if (mask != 0) onChange(value.copy(daysMask = mask))
                             }
@@ -447,7 +447,7 @@ private fun StepperButton(label: String, onClick: () -> Unit) {
     Box(
         Modifier
             .size(40.dp)
-            .bouncyClickable(onClick = onClick)
+            .bouncyClickable(glowColor = WoodyTheme.colors.textPrimary, glowShape = CircleShape, onClick = onClick)
             .clip(CircleShape)
             .background(WoodyTheme.colors.chip),
         contentAlignment = Alignment.Center,

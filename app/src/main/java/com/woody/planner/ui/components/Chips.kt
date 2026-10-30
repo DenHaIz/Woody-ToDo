@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.woody.planner.ui.theme.Motion
@@ -34,10 +35,12 @@ fun WoodyChip(
 ) {
     val colors = WoodyTheme.colors
     val background by animateColorAsState(if (selected) selectedColor else colors.chip, Motion.snappy(), label = "chipBg")
-    val content by animateColorAsState(if (selected) Color.White else colors.textPrimary, Motion.snappy(), label = "chipFg")
+    // Текст всегда контрастен фону: на светлом выбранном чипе — тёмный, на тёмном — белый.
+    val onSelected = if (selectedColor.luminance() > 0.5f) Color(0xFF1B2233) else Color.White
+    val content by animateColorAsState(if (selected) onSelected else colors.textPrimary, Motion.snappy(), label = "chipFg")
     Row(
         modifier
-            .bouncyClickable(onClick = onClick)
+            .bouncyClickable(glowColor = selectedColor, glowShape = Shapes.Chip, onClick = onClick)
             .clip(Shapes.Chip)
             .background(background)
             .padding(horizontal = 14.dp, vertical = 9.dp),
@@ -46,7 +49,7 @@ fun WoodyChip(
     ) {
         if (icon != null) Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
         if (leadingText != null) Text(leadingText, style = MaterialTheme.typography.labelLarge)
-        Text(label, color = content, style = MaterialTheme.typography.labelMedium)
+        Text(label, color = content, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 

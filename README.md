@@ -2,7 +2,7 @@
 
 <p>
   <img src="docs/day_light.png" width="240" alt="День">
-  <img src="docs/fab_menu.png" width="240" alt="Меню">
+  <img src="docs/settings_light.png" width="240" alt="Настройки">
   <img src="docs/sunday_dark.png" width="240" alt="Тёмная тема">
 </p>
 

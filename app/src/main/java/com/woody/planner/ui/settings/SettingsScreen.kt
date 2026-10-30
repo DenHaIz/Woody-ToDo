@@ -93,12 +93,11 @@ import kotlinx.coroutines.launch
 
 /**
  * Экран настроек: выезжает справа поверх дня, закрывается стрелкой или жестом «назад»
- * (с предпросмотром — экран тянется за пальцем). [focusCategories] — сразу прокрутить к категориям.
+ * (с предпросмотром — экран тянется за пальцем).
  */
 @Composable
 fun SettingsPage(
     visible: Boolean,
-    focusCategories: Boolean,
     container: AppContainer,
     categoriesVm: CategoriesViewModel,
     onClose: () -> Unit,
@@ -148,7 +147,6 @@ fun SettingsPage(
                 SettingsContent(
                     container = container,
                     categoriesVm = categoriesVm,
-                    focusCategories = focusCategories,
                     onClose = onClose,
                     onEditCategory = { editingCategory = it },
                     onRequestNotifications = onRequestNotifications,
@@ -174,7 +172,6 @@ fun SettingsPage(
 private fun SettingsContent(
     container: AppContainer,
     categoriesVm: CategoriesViewModel,
-    focusCategories: Boolean,
     onClose: () -> Unit,
     onEditCategory: (Category) -> Unit,
     onRequestNotifications: () -> Unit,
@@ -190,22 +187,12 @@ private fun SettingsContent(
     val categories by categoriesVm.categories.collectAsStateWithLifecycle()
     val counts by categoriesVm.counts.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
-    var categoriesTop by remember { mutableIntStateOf(0) }
 
     // Статусы разрешений перечитываем при каждом возвращении на экран.
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
     val notificationsAllowed = remember(lifecycleState) { Notifications.canPost(context) }
     val exactAllowed = remember(lifecycleState) { container.reminders.canScheduleExact }
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-
-    LaunchedEffect(focusCategories) {
-        if (focusCategories) {
-            delay(350)
-            // Раздел «Категории» — прямо под шапку.
-            val gap = with(density) { 8.dp.roundToPx() }
-            scrollState.animateScrollTo((categoriesTop - headerHeight - gap).coerceAtLeast(0), Motion.soft())
-        }
-    }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -272,7 +259,7 @@ private fun SettingsContent(
                 SwipeDemo(swipeStyle)
             }
 
-            SettingsCard("Категории", Modifier.onGloballyPositioned { categoriesTop = it.positionInParent().y.toInt() }) {
+            SettingsCard("Категории") {
                 categories.forEach { category ->
                     CategoryRow(category, counts[category.id] ?: 0) { onEditCategory(category) }
                 }

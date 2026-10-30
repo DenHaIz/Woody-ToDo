@@ -43,7 +43,6 @@ import com.woody.planner.data.SwipeStyle
 import com.woody.planner.reminders.Notifications
 import com.woody.planner.ui.categories.CategoriesViewModel
 import com.woody.planner.ui.components.AmbientBackground
-import com.woody.planner.ui.components.FabMenuItem
 import com.woody.planner.ui.components.LocalSwipeStyle
 import com.woody.planner.ui.components.WoodyFab
 import com.woody.planner.ui.components.bouncyClickable
@@ -56,7 +55,6 @@ import com.woody.planner.ui.glass.liquidGlass
 import com.woody.planner.ui.settings.SettingsPage
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
-import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -90,7 +88,6 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
     val swipeStyle by container.settings.swipeStyle.collectAsStateWithLifecycle(SwipeStyle.Classic)
     val hintSeen by container.settings.menuHintSeen.collectAsStateWithLifecycle(true)
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
-    var focusCategories by rememberSaveable { mutableStateOf(false) }
     var hint by remember { mutableStateOf<Message?>(null) }
     var showFabHint by remember { mutableStateOf(false) }
 
@@ -168,22 +165,15 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
 
             WoodyFab(
                 onAdd = { editorVm.openNew(selectedDay) },
-                items = listOf(
-                    FabMenuItem("Категории", WoodyIcons.Grid) {
-                        focusCategories = true
-                        settingsOpen = true
-                    },
-                    FabMenuItem("Настройки", WoodyIcons.Sliders) {
-                        focusCategories = false
-                        settingsOpen = true
-                    },
-                ),
-                showHint = showFabHint,
-                onMenuOpened = {
+                onOpenSettings = {
                     showFabHint = false
                     if (!hintSeen) scope.launch { container.settings.setMenuHintSeen() }
+                    settingsOpen = true
                 },
-                modifier = Modifier.navigationBarsPadding(),
+                showHint = showFabHint,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding(),
             )
 
             TaskEditorSheet(
@@ -201,7 +191,6 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
 
             SettingsPage(
                 visible = settingsOpen,
-                focusCategories = focusCategories,
                 container = container,
                 categoriesVm = categoriesVm,
                 onClose = { settingsOpen = false },
