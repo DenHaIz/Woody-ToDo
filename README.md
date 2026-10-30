@@ -2,8 +2,8 @@
 
 <p>
   <img src="docs/day_light.png" width="240" alt="День">
+  <img src="docs/editor_light.png" width="240" alt="Новая задача">
   <img src="docs/settings_light.png" width="240" alt="Настройки">
-  <img src="docs/sunday_dark.png" width="240" alt="Тёмная тема">
 </p>
 
 **RU** — Простой ежедневник для Android: задачи на день, повторы, чек-листы и напоминания. Плавные анимации, эффект стекла, не тратит батарею в фоне. Android 12+.

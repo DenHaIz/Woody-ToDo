@@ -1,61 +1,74 @@
 package com.woody.planner.ui.editor
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.woody.planner.data.DraftSubtask
 import com.woody.planner.data.TaskDraft
 import com.woody.planner.domain.Category
@@ -63,31 +76,47 @@ import com.woody.planner.domain.Recurrence
 import com.woody.planner.domain.RecurrenceType
 import com.woody.planner.domain.ReminderMath
 import com.woody.planner.domain.bit
+import com.woody.planner.ui.components.FitText
 import com.woody.planner.ui.components.GlassSheet
+import com.woody.planner.ui.components.MonthCalendar
 import com.woody.planner.ui.components.RuLocale
 import com.woody.planner.ui.components.WoodyChip
 import com.woody.planner.ui.components.bouncyClickable
+import com.woody.planner.ui.glass.liquidGlass
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
 import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
-import kotlinx.coroutines.delay
 import java.time.DayOfWeek
-import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneOffset
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle as JTextStyle
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
-private val DateFormat = DateTimeFormatter.ofPattern("d MMM", RuLocale)
+private val DateFormat = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
 
 private val ReminderOptions = listOf(0 to "В момент", 10 to "За 10 мин", 30 to "За 30 мин", 60 to "За час")
+private val TimePresets = listOf(LocalTime.of(9, 0), LocalTime.of(13, 0), LocalTime.of(18, 0), LocalTime.of(21, 0))
+
+private val TileShape = RoundedCornerShape(24.dp)
+
+/** Параметр задачи, который настраивается во всплывающем окне. */
+private enum class Param(val title: String) {
+    Date("Дата"),
+    Time("Время"),
+    Category("Категория"),
+    Reminder("Напоминание"),
+    Repeat("Повтор"),
+    Checklist("Чек-лист"),
+}
 
 /**
- * Редактор задачи в стеклянном листе.
- * [onSave] вызывается с готовым черновиком, [onDelete] — для существующих задач.
+ * Редактор задачи в стеклянном листе: название и шесть плиток-параметров со значениями
+ * по умолчанию. Нажатие на плитку открывает окно настройки, которое «вырастает» из неё.
+ * Клавиатура появляется только по нажатию на поле ввода.
  */
 @Composable
 fun TaskEditorSheet(
@@ -99,38 +128,79 @@ fun TaskEditorSheet(
     onDelete: (Long) -> Unit,
     onReminderEnabled: () -> Unit,
 ) {
-    // Держим последний черновик, чтобы лист доигрывал анимацию закрытия с содержимым.
-    var last by remember { mutableStateOf(draft) }
-    if (draft != null) last = draft
+    // Рабочая копия черновика: её правят и лист, и окна параметров. Сбрасывается при каждом
+    // новом открытии и живёт, пока лист доигрывает анимацию закрытия.
+    var openedFor by remember { mutableStateOf<TaskDraft?>(null) }
+    var work by remember { mutableStateOf<TaskDraft?>(null) }
+    var param by remember { mutableStateOf<Param?>(null) }
+    var origin by remember { mutableStateOf(Offset.Unspecified) }
+    if (draft != null && draft !== openedFor) {
+        openedFor = draft
+        work = draft
+        param = null
+    }
+    if (draft == null && param != null) param = null
 
     GlassSheet(visible = draft != null, onDismiss = onDismiss) {
-        val initial = last ?: return@GlassSheet
-        EditorContent(initial, categories, today, onSave, onDelete, onDismiss, onReminderEnabled)
+        val current = work ?: return@GlassSheet
+        EditorContent(
+            draft = current,
+            isNew = openedFor?.isNew ?: true,
+            categories = categories,
+            today = today,
+            onChange = { work = it },
+            onOpenParam = { p, at ->
+                origin = at
+                param = p
+            },
+            onSave = onSave,
+            onDelete = onDelete,
+            onDismiss = onDismiss,
+        )
+    }
+
+    ParamPopup(open = param, origin = origin, onDismiss = { param = null }) { shown ->
+        val current = work ?: return@ParamPopup
+        val update: (TaskDraft) -> Unit = { work = it }
+        val close = { param = null }
+        when (shown) {
+            Param.Date -> DatePanel(current, today, update, close)
+            Param.Time -> TimePanel(current, update, close)
+            Param.Category -> CategoryPanel(current, categories, update, close)
+            Param.Reminder -> ReminderPanel(
+                draft = current,
+                today = today,
+                onChange = {
+                    if (current.reminderOffsetMin == null && it.reminderOffsetMin != null) onReminderEnabled()
+                    update(it)
+                },
+                onPickTime = { param = Param.Time },
+                onClose = close,
+            )
+            Param.Repeat -> RepeatPanel(current, update, close)
+            Param.Checklist -> ChecklistPanel(current, update, close)
+        }
     }
 }
 
 @Composable
 private fun EditorContent(
-    initial: TaskDraft,
+    draft: TaskDraft,
+    isNew: Boolean,
     categories: List<Category>,
     today: LocalDate,
+    onChange: (TaskDraft) -> Unit,
+    onOpenParam: (Param, Offset) -> Unit,
     onSave: (TaskDraft) -> Unit,
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
-    onReminderEnabled: () -> Unit,
 ) {
     val colors = WoodyTheme.colors
-    var draft by remember(initial) { mutableStateOf(initial) }
-    var nextKey by remember(initial) { mutableLongStateOf(-1L) }
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    val titleFocus = remember { FocusRequester() }
-
-    LaunchedEffect(initial) {
-        if (initial.isNew) {
-            delay(280)
-            titleFocus.requestFocus()
-        }
+    val focusManager = LocalFocusManager.current
+    val open: (Param, Offset) -> Unit = { p, at ->
+        // Окно параметра — без клавиатуры: снимаем фокус с полей ввода.
+        focusManager.clearFocus()
+        onOpenParam(p, at)
     }
 
     Column(
@@ -141,141 +211,87 @@ private fun EditorContent(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (initial.isNew) "Новая задача" else "Задача",
+                if (isNew) "Новая задача" else "Задача",
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.textSecondary,
                 modifier = Modifier.weight(1f),
             )
-            Icon(
-                WoodyIcons.Close,
-                contentDescription = "Закрыть",
-                tint = colors.textSecondary,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .bouncyClickable(onClick = onDismiss)
-                    .padding(7.dp),
-            )
+            CloseButton(onDismiss)
         }
 
         PlainField(
             value = draft.title,
-            onValueChange = { draft = draft.copy(title = it) },
+            onValueChange = { onChange(draft.copy(title = it)) },
             placeholder = "Что нужно сделать?",
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier
                 .fillMaxWidth()
-                .focusRequester(titleFocus)
                 .padding(vertical = 6.dp),
-            imeAction = ImeAction.Next,
+            imeAction = ImeAction.Done,
+            onImeAction = { focusManager.clearFocus() },
         )
         PlainField(
             value = draft.note,
-            onValueChange = { draft = draft.copy(note = it) },
+            onValueChange = { onChange(draft.copy(note = it)) },
             placeholder = "Заметка",
             style = MaterialTheme.typography.bodyLarge.copy(color = colors.textSecondary),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 4.dp),
+                .padding(bottom = 14.dp),
             singleLine = false,
         )
 
-        EditorSection("Категория") {
+        val category = categories.firstOrNull { it.id == draft.categoryId }
+        val tiles = listOf(
+            TileData(Param.Date, WoodyIcons.Calendar, dateLabel(draft.date, today), active = draft.date != today),
+            TileData(
+                Param.Time,
+                WoodyIcons.Clock,
+                draft.time?.format(TimeFormat) ?: "Весь день",
+                active = draft.time != null,
+            ),
+            TileData(
+                Param.Category,
+                WoodyIcons.Grid,
+                category?.name ?: "Нет",
+                active = category != null,
+                tint = category?.let { Color(it.colorArgb) },
+                emoji = category?.emoji,
+            ),
+            TileData(
+                Param.Reminder,
+                WoodyIcons.Bell,
+                ReminderOptions.firstOrNull { it.first == draft.reminderOffsetMin }?.second ?: "Нет",
+                active = draft.reminderOffsetMin != null,
+            ),
+            TileData(Param.Repeat, WoodyIcons.Repeat, recurrenceLabel(draft.recurrence), active = draft.recurrence.isRecurring),
+            TileData(
+                Param.Checklist,
+                WoodyIcons.Checklist,
+                draft.subtasks.count { it.title.isNotBlank() }.let { if (it == 0) "Пусто" else pointsWord(it) },
+                active = draft.subtasks.any { it.title.isNotBlank() },
+            ),
+        )
+        tiles.chunked(3).forEach { row ->
             Row(
-                Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                WoodyChip(
-                    label = "Без категории",
-                    selected = draft.categoryId == null,
-                    onClick = { draft = draft.copy(categoryId = null) },
-                    selectedColor = colors.textPrimary,
-                )
-                categories.forEach { category ->
-                    WoodyChip(
-                        label = category.name,
-                        leadingText = category.emoji,
-                        selected = draft.categoryId == category.id,
-                        onClick = { draft = draft.copy(categoryId = category.id) },
-                        selectedColor = Color(category.colorArgb),
-                    )
+                row.forEach { tile ->
+                    ParamTile(tile, onClick = { open(tile.param, it) }, modifier = Modifier.weight(1f))
                 }
             }
         }
 
-        EditorSection("Когда") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                val tomorrow = today.plusDays(1)
-                WoodyChip("Сегодня", draft.date == today, { draft = draft.copy(date = today) })
-                WoodyChip("Завтра", draft.date == tomorrow, { draft = draft.copy(date = tomorrow) })
-                val custom = draft.date != today && draft.date != tomorrow
-                WoodyChip(
-                    label = if (custom) draft.date.format(DateFormat) else "Дата…",
-                    selected = custom,
-                    onClick = { showDatePicker = true },
-                    icon = WoodyIcons.Calendar,
-                )
-                WoodyChip(
-                    label = draft.time?.format(TimeFormat) ?: "Время",
-                    selected = draft.time != null,
-                    onClick = { showTimePicker = true },
-                    icon = WoodyIcons.Clock,
-                    selectedColor = colors.textPrimary,
-                )
-                AnimatedVisibility(draft.time != null, enter = fadeIn(), exit = fadeOut()) {
-                    WoodyChip("Без времени", false, { draft = draft.copy(time = null) })
-                }
-            }
-        }
-
-        EditorSection("Напоминание") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                WoodyChip("Нет", draft.reminderOffsetMin == null, { draft = draft.copy(reminderOffsetMin = null) })
-                ReminderOptions.forEach { (minutes, label) ->
-                    WoodyChip(
-                        label = label,
-                        selected = draft.reminderOffsetMin == minutes,
-                        icon = WoodyIcons.Bell,
-                        onClick = {
-                            if (draft.reminderOffsetMin == null) onReminderEnabled()
-                            draft = draft.copy(reminderOffsetMin = minutes)
-                        },
-                    )
-                }
-            }
-            AnimatedVisibility(
-                visible = draft.reminderOffsetMin != null && draft.time == null,
-                enter = expandVertically(Motion.soft()) + fadeIn(),
-                exit = shrinkVertically(Motion.soft()) + fadeOut(),
-            ) {
-                Text(
-                    "Время не задано — напомню в ${ReminderMath.DefaultTime.format(TimeFormat)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary,
-                    modifier = Modifier.padding(top = 8.dp, start = 4.dp),
-                )
-            }
-        }
-
-        EditorSection("Повтор") {
-            RecurrenceEditor(draft.recurrence, draft.date) { draft = draft.copy(recurrence = it) }
-        }
-
-        EditorSection("Чек-лист") {
-            SubtaskEditor(
-                subtasks = draft.subtasks,
-                onChange = { draft = draft.copy(subtasks = it) },
-                newKey = { nextKey.also { nextKey-- } },
-            )
-        }
-
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (!initial.isNew) {
+            if (!isNew) {
                 Box(
                     Modifier
                         .size(54.dp)
-                        .bouncyClickable(glowColor = colors.accent, glowShape = CircleShape) { onDelete(initial.id) }
+                        .bouncyClickable(glowColor = colors.accent, glowShape = CircleShape) { onDelete(draft.id) }
                         .clip(CircleShape)
                         .background(colors.accent.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
@@ -293,68 +309,354 @@ private fun EditorContent(
                 Modifier
                     .weight(1f)
                     .height(54.dp)
-                    .bouncyClickable(enabled = enabled, glowColor = Color.White, glowShape = Shapes.Pill) { onSave(draft) }
+                    .bouncyClickable(enabled = enabled, glowColor = Color.White, glowShape = Shapes.Pill) {
+                        focusManager.clearFocus()
+                        onSave(draft)
+                    }
                     .clip(Shapes.Pill)
                     .background(saveColor),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    if (initial.isNew) "Добавить" else "Сохранить",
+                    if (isNew) "Добавить" else "Сохранить",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color.White,
                 )
             }
         }
     }
+}
 
-    if (showDatePicker) {
-        val state = rememberDatePickerState(
-            initialSelectedDateMillis = draft.date.atStartOfDay().toInstant(ZoneOffset.UTC).toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton({
-                    state.selectedDateMillis?.let {
-                        draft = draft.copy(date = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate())
-                    }
-                    showDatePicker = false
-                }) { Text("Готово") }
-            },
-            dismissButton = { TextButton({ showDatePicker = false }) { Text("Отмена") } },
+private data class TileData(
+    val param: Param,
+    val icon: ImageVector,
+    val value: String,
+    val active: Boolean,
+    val tint: Color? = null,
+    val emoji: String? = null,
+)
+
+/** Скруглённый квадрат: значок, название параметра и его текущее значение. */
+@Composable
+private fun ParamTile(tile: TileData, onClick: (Offset) -> Unit, modifier: Modifier = Modifier) {
+    val colors = WoodyTheme.colors
+    val tint = tile.tint ?: colors.accent
+    var center by remember { mutableStateOf(Offset.Unspecified) }
+    val background by animateColorAsState(
+        if (tile.active) tint.copy(alpha = if (colors.isDark) 0.24f else 0.14f) else colors.chip,
+        Motion.snappy(),
+        label = "tileBg",
+    )
+    val valueColor by animateColorAsState(if (tile.active) tint else colors.textPrimary, Motion.snappy(), label = "tileFg")
+    Column(
+        modifier
+            .aspectRatio(1f)
+            .onGloballyPositioned { center = it.boundsInRoot().center }
+            .bouncyClickable(glowColor = tint, glowShape = TileShape) { onClick(center) }
+            .clip(TileShape)
+            .background(background)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .background(if (tile.active) tint.copy(alpha = 0.18f) else colors.background.copy(alpha = 0.6f), CircleShape),
+            contentAlignment = Alignment.Center,
         ) {
-            DatePicker(state)
+            if (tile.emoji != null) {
+                Text(tile.emoji, fontSize = 18.sp)
+            } else {
+                Icon(tile.icon, contentDescription = null, tint = if (tile.active) tint else colors.textSecondary, modifier = Modifier.size(18.dp))
+            }
+        }
+        Column {
+            FitText(tile.param.title, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+            FitText(
+                tile.value,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = valueColor,
+                minSize = 10.sp,
+            )
         }
     }
+}
 
-    if (showTimePicker) {
-        val initialTime = draft.time ?: LocalTime.now().plusHours(1).withMinute(0)
-        val state = rememberTimePickerState(initialTime.hour, initialTime.minute, is24Hour = true)
-        AlertDialog(
-            onDismissRequest = { showTimePicker = false },
-            confirmButton = {
-                TextButton({
-                    draft = draft.copy(time = LocalTime.of(state.hour, state.minute))
-                    showTimePicker = false
-                }) { Text("Готово") }
+/**
+ * Окно настройки параметра поверх экрана. Вырастает из точки [origin] (центр нажатой плитки)
+ * и сворачивается обратно в неё. Закрывается тапом по фону, «назад» или кнопкой.
+ */
+@Composable
+private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, content: @Composable (Param) -> Unit) {
+    val colors = WoodyTheme.colors
+    var last by remember { mutableStateOf(open) }
+    if (open != null) last = open
+    val progress = remember { Animatable(0f) }
+    val isOpen by rememberUpdatedState(open != null)
+    LaunchedEffect(open != null) {
+        progress.animateTo(
+            if (open != null) 1f else 0f,
+            if (open != null) spring(dampingRatio = 0.78f, stiffness = 420f) else spring(dampingRatio = 1f, stiffness = 650f),
+        )
+    }
+    val shown by remember { derivedStateOf { isOpen || progress.value > 0.001f } }
+    if (!shown) return
+    val shownParam = last ?: return
+
+    BackHandler(enabled = open != null, onBack = onDismiss)
+
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = progress.value.coerceIn(0f, 1f) }
+                .background(colors.scrim)
+                .clickable(interactionSource = null, indication = null, onClick = onDismiss),
+        )
+        var bounds by remember { mutableStateOf(Rect.Zero) }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { bounds = it.boundsInRoot() }
+                    .graphicsLayer {
+                        val p = progress.value
+                        transformOrigin = if (origin.isSpecified && bounds.width > 0f && bounds.height > 0f) {
+                            TransformOrigin((origin.x - bounds.left) / bounds.width, (origin.y - bounds.top) / bounds.height)
+                        } else {
+                            TransformOrigin.Center
+                        }
+                        val s = 0.2f + 0.8f * p
+                        scaleX = s
+                        scaleY = s
+                        alpha = (p * 1.8f).coerceIn(0f, 1f)
+                    }
+                    .liquidGlass(Shapes.Panel, tint = colors.background.copy(alpha = if (colors.isDark) 0.86f else 0.8f))
+                    .clickable(interactionSource = null, indication = null) { /* тапы внутри окна не закрывают его */ }
+                    .heightIn(max = 640.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+                    Text(
+                        shownParam.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.textPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    CloseButton(onDismiss)
+                }
+                content(shownParam)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CloseButton(onClick: () -> Unit) {
+    val colors = WoodyTheme.colors
+    Icon(
+        WoodyIcons.Close,
+        contentDescription = "Закрыть",
+        tint = colors.textSecondary,
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .bouncyClickable(onClick = onClick)
+            .padding(7.dp),
+    )
+}
+
+/** Кнопка подтверждения внизу окна параметра. */
+@Composable
+private fun DoneButton(onClick: () -> Unit) {
+    val colors = WoodyTheme.colors
+    Box(
+        Modifier
+            .padding(top = 16.dp)
+            .fillMaxWidth()
+            .height(50.dp)
+            .bouncyClickable(glowColor = Color.White, glowShape = Shapes.Pill, onClick = onClick)
+            .clip(Shapes.Pill)
+            .background(colors.accent),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("Готово", style = MaterialTheme.typography.labelLarge, color = Color.White)
+    }
+}
+
+// --- Окна параметров ---
+
+@Composable
+private fun DatePanel(draft: TaskDraft, today: LocalDate, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
+    var month by remember { mutableStateOf(YearMonth.from(draft.date)) }
+    val pick = { day: LocalDate ->
+        onChange(draft.copy(date = day))
+        onClose()
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        WoodyChip("Сегодня", draft.date == today, { pick(today) })
+        WoodyChip("Завтра", draft.date == today.plusDays(1), { pick(today.plusDays(1)) })
+        WoodyChip("Через неделю", draft.date == today.plusWeeks(1), { pick(today.plusWeeks(1)) })
+    }
+    Spacer(Modifier.height(12.dp))
+    MonthCalendar(
+        month = month,
+        selected = draft.date,
+        today = today,
+        summaries = { emptyList() },
+        onSelect = pick,
+        onMonthChange = { month = it },
+    )
+}
+
+@Composable
+private fun TimePanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
+    val colors = WoodyTheme.colors
+    val initial = draft.time ?: LocalTime.now().plusHours(1).withMinute(0)
+    val state = rememberTimePickerState(initial.hour, initial.minute, is24Hour = true)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        WoodyChip("Весь день", draft.time == null, {
+            onChange(draft.copy(time = null))
+            onClose()
+        })
+        TimePresets.forEach { preset ->
+            WoodyChip(preset.format(TimeFormat), draft.time == preset, {
+                onChange(draft.copy(time = preset))
+                onClose()
+            })
+        }
+    }
+    Spacer(Modifier.height(16.dp))
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        TimePicker(
+            state,
+            colors = TimePickerDefaults.colors(
+                clockDialColor = colors.chip,
+                selectorColor = colors.accent,
+                timeSelectorSelectedContainerColor = colors.accent.copy(alpha = 0.18f),
+                timeSelectorSelectedContentColor = colors.accent,
+                timeSelectorUnselectedContainerColor = colors.chip,
+                timeSelectorUnselectedContentColor = colors.textPrimary,
+                clockDialSelectedContentColor = Color.White,
+                clockDialUnselectedContentColor = colors.textPrimary,
+            ),
+        )
+    }
+    DoneButton {
+        onChange(draft.copy(time = LocalTime.of(state.hour, state.minute)))
+        onClose()
+    }
+}
+
+@Composable
+private fun CategoryPanel(draft: TaskDraft, categories: List<Category>, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
+    val colors = WoodyTheme.colors
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        WoodyChip(
+            label = "Без категории",
+            selected = draft.categoryId == null,
+            onClick = {
+                onChange(draft.copy(categoryId = null))
+                onClose()
             },
-            dismissButton = { TextButton({ showTimePicker = false }) { Text("Отмена") } },
-            text = { TimePicker(state) },
+            selectedColor = colors.textPrimary,
+        )
+        categories.forEach { category ->
+            WoodyChip(
+                label = category.name,
+                leadingText = category.emoji,
+                selected = draft.categoryId == category.id,
+                onClick = {
+                    onChange(draft.copy(categoryId = category.id))
+                    onClose()
+                },
+                selectedColor = Color(category.colorArgb),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReminderPanel(
+    draft: TaskDraft,
+    today: LocalDate,
+    onChange: (TaskDraft) -> Unit,
+    onPickTime: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val colors = WoodyTheme.colors
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        WoodyChip("Нет", draft.reminderOffsetMin == null, {
+            onChange(draft.copy(reminderOffsetMin = null))
+            onClose()
+        })
+        ReminderOptions.forEach { (minutes, label) ->
+            WoodyChip(
+                label = label,
+                selected = draft.reminderOffsetMin == minutes,
+                icon = WoodyIcons.Bell,
+                onClick = {
+                    onChange(draft.copy(reminderOffsetMin = minutes))
+                    // Без времени напоминание привязано к 9:00 — оставляем окно открытым с подсказкой.
+                    if (draft.time != null) onClose()
+                },
+            )
+        }
+    }
+    if (draft.time == null) {
+        // Без времени напоминание приходит в 9:00; если сегодня это время уже прошло — его не будет.
+        val offset = (draft.reminderOffsetMin ?: 0).toLong()
+        val missed = draft.date == today &&
+            LocalDateTime.now().isAfter(today.atTime(ReminderMath.DefaultTime).minusMinutes(offset)) &&
+            !draft.recurrence.isRecurring
+        Text(
+            if (missed) {
+                "У задачи нет времени, а сегодня ${ReminderMath.DefaultTime.format(TimeFormat)} уже прошло — укажите время, иначе напоминания не будет."
+            } else {
+                "У задачи нет времени — напомню в ${ReminderMath.DefaultTime.format(TimeFormat)}."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (missed) colors.accent else colors.textSecondary,
+            modifier = Modifier.padding(top = 14.dp, start = 4.dp),
+        )
+        Text(
+            "Указать время",
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.accent,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .bouncyClickable(glowColor = colors.accent, glowShape = Shapes.Pill, onClick = onPickTime)
+                .clip(Shapes.Pill)
+                .background(colors.accent.copy(alpha = 0.12f))
+                .padding(horizontal = 16.dp, vertical = 10.dp),
         )
     }
 }
 
 @Composable
-private fun EditorSection(title: String, content: @Composable () -> Unit) {
-    Column(Modifier.padding(top = 18.dp)) {
-        Text(
-            title.uppercase(RuLocale),
-            style = MaterialTheme.typography.labelSmall,
-            color = WoodyTheme.colors.textSecondary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
-        )
-        content()
-    }
+private fun RepeatPanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
+    RecurrenceEditor(draft.recurrence, draft.date) { onChange(draft.copy(recurrence = it)) }
+    DoneButton(onClose)
+}
+
+@Composable
+private fun ChecklistPanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
+    var nextKey by remember { mutableLongStateOf(-1L - draft.subtasks.size) }
+    SubtaskEditor(
+        subtasks = draft.subtasks,
+        onChange = { onChange(draft.copy(subtasks = it)) },
+        newKey = { nextKey.also { nextKey-- } },
+    )
+    DoneButton(onClose)
 }
 
 @Composable
@@ -402,7 +704,7 @@ private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: 
                     val scale = animateFloatAsState(if (on) 1f else 0.9f, Motion.bouncy(), label = "dowScale")
                     Box(
                         Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .graphicsLayer {
                                 scaleX = scale.value
                                 scaleY = scale.value
@@ -557,6 +859,41 @@ private fun PlainField(
             }
         },
     )
+}
+
+private fun dateLabel(date: LocalDate, today: LocalDate): String = when (date) {
+    today -> "Сегодня"
+    today.plusDays(1) -> "Завтра"
+    today.minusDays(1) -> "Вчера"
+    else -> date.format(DateFormat)
+}
+
+private fun recurrenceLabel(r: Recurrence): String = when (r.type) {
+    RecurrenceType.NONE -> "Нет"
+    RecurrenceType.DAILY -> "Каждый день"
+    RecurrenceType.WEEKLY -> {
+        val days = DayOfWeek.entries.filter { r.daysMask and it.bit != 0 }
+        when {
+            days.size == 7 -> "Каждый день"
+            days == DayOfWeek.entries.take(5) -> "По будням"
+            days == DayOfWeek.entries.takeLast(2) -> "По выходным"
+            else -> days.joinToString(", ") { it.getDisplayName(JTextStyle.SHORT, RuLocale) }
+        }
+    }
+    RecurrenceType.EVERY_N_DAYS -> "Раз в ${r.interval} ${daysWord(r.interval)}"
+    RecurrenceType.MONTHLY -> "Каждый месяц"
+}
+
+private fun pointsWord(n: Int): String {
+    val mod100 = n % 100
+    val mod10 = n % 10
+    val word = when {
+        mod100 in 11..14 -> "пунктов"
+        mod10 == 1 -> "пункт"
+        mod10 in 2..4 -> "пункта"
+        else -> "пунктов"
+    }
+    return "$n $word"
 }
 
 private fun daysWord(n: Int): String {

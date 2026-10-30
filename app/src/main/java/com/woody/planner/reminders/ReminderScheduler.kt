@@ -51,8 +51,29 @@ class ReminderScheduler(
         setAlarm(taskId, occurrence, System.currentTimeMillis() + minutes * 60_000L)
     }
 
+    /** Пробное напоминание через [delayMs] — проверяет всю цепочку: будильник, приёмник, канал, звук. */
+    fun scheduleTest(delayMs: Long) {
+        val pending = PendingIntent.getBroadcast(
+            context,
+            TEST_REQUEST_CODE,
+            Intent(context, ReminderReceiver::class.java).setAction(ReminderReceiver.ACTION_TEST),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val at = System.currentTimeMillis() + delayMs
+        if (alarmManager.canScheduleExactAlarms()) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+        } else {
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
+        }
+    }
+
     fun cancel(taskId: Long) {
         alarmManager.cancel(firePendingIntent(taskId, null))
+    }
+
+    private companion object {
+        /** Код запроса пробного будильника — вне диапазона id задач. */
+        const val TEST_REQUEST_CODE = Int.MAX_VALUE - 7
     }
 
     private fun setAlarm(taskId: Long, occurrence: LocalDate, atMillis: Long) {

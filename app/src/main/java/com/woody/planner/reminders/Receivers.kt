@@ -27,6 +27,10 @@ private fun BroadcastReceiver.runAsync(block: suspend () -> Unit) {
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val container = (context.applicationContext as WoodyApp).container
+        if (intent.action == ACTION_TEST) {
+            Notifications.showTest(context)
+            return
+        }
         val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L).takeIf { it >= 0 } ?: return
         val day = intent.getLongExtra(EXTRA_EPOCH_DAY, Long.MIN_VALUE)
             .takeIf { it != Long.MIN_VALUE }
@@ -56,6 +60,7 @@ class ReminderReceiver : BroadcastReceiver() {
         const val ACTION_FIRE = "com.woody.planner.REMINDER_FIRE"
         const val ACTION_DONE = "com.woody.planner.REMINDER_DONE"
         const val ACTION_SNOOZE = "com.woody.planner.REMINDER_SNOOZE"
+        const val ACTION_TEST = "com.woody.planner.REMINDER_TEST"
         const val EXTRA_TASK_ID = "task_id"
         const val EXTRA_EPOCH_DAY = "epoch_day"
     }

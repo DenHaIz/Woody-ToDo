@@ -2,6 +2,10 @@ package com.woody.planner.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
@@ -51,6 +55,11 @@ class InteractionTest {
         compose.waitForIdle()
     }
 
+    /** Действия пишут в базу в фоновом потоке — ждём результат, а не только окончания анимаций. */
+    private fun awaitText(text: String) {
+        compose.waitUntil(timeoutMillis = 5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     private fun swipeDoneAndPostpone(style: SwipeStyle) {
         start(style)
         // Вправо — выполнено.
@@ -58,13 +67,13 @@ class InteractionTest {
             swipeRight(startX = left + 40f, endX = left + width * 0.7f, durationMillis = 300)
         }
         compose.waitForIdle()
-        compose.onNodeWithText("ВЫПОЛНЕНО · 1").assertExists()
+        awaitText("ВЫПОЛНЕНО · 1")
         // Влево — на завтра (с плашкой «Отменить»).
         compose.onNodeWithText("Разобрать почту").performTouchInput {
             swipeLeft(startX = right - 40f, endX = right - width * 0.7f, durationMillis = 300)
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Перенесено на завтра").assertExists()
+        awaitText("Перенесено на завтра")
     }
 
     @Test
@@ -92,7 +101,7 @@ class InteractionTest {
         compose.onNodeWithContentDescription("Добавить").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Новая задача").assertExists()
-        compose.onNodeWithText("КОГДА").performTouchInput {
+        compose.onNodeWithText("Напоминание").performTouchInput {
             swipeDown(startY = centerY, endY = centerY + 900f, durationMillis = 250)
         }
         compose.waitForIdle()
@@ -104,7 +113,7 @@ class InteractionTest {
         start()
         compose.onNodeWithContentDescription("Добавить").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("КОГДА").performTouchInput {
+        compose.onNodeWithText("Напоминание").performTouchInput {
             swipeDown(startY = centerY, endY = centerY + 60f, durationMillis = 600)
         }
         compose.waitForIdle()
@@ -117,5 +126,47 @@ class InteractionTest {
         compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
         compose.waitForIdle()
         compose.onNodeWithText("АНИМАЦИЯ СВАЙПА").assertExists()
+    }
+
+    @Test
+    fun editorOpensWithoutFocusAndKeyboard() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().assertIsNotFocused()
+        // Фокус — только по нажатию на поле.
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().assertIsFocused()
+    }
+
+    @Test
+    fun tileOpensPopupAndAppliesValue() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Категория").performClick()
+        compose.waitForIdle()
+        // Окно вырастает из плитки: заголовок окна + подпись плитки.
+        compose.onAllNodesWithText("Категория").assertCountEquals(2)
+        awaitText("Спорт")
+        compose.onNodeWithText("Спорт").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithText("Категория").assertCountEquals(1)
+        compose.onNodeWithText("Спорт").assertExists()
+    }
+
+    @Test
+    fun settingsShowRecentCategoriesAndExpand() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        compose.onNodeWithText("КАТЕГОРИИ").assertExists()
+        // Из пяти стандартных категорий сначала видны три.
+        compose.onAllNodesWithText("Здоровье").assertCountEquals(0)
+        awaitText("Все категории · 5")
+        compose.onNodeWithText("Все категории · 5").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Здоровье").assertExists()
+        compose.onNodeWithText("Свернуть").assertExists()
     }
 }

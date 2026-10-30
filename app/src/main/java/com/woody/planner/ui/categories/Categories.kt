@@ -63,19 +63,32 @@ import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class CategoriesViewModel(container: AppContainer) : ViewModel() {
     private val repository = container.repository
+    private val settings = container.settings
 
     val categories: StateFlow<List<Category>> =
         repository.categories.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val counts: StateFlow<Map<Long, Int>> =
         repository.categoryTaskCounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    fun save(category: Category) = viewModelScope.launch { repository.saveCategory(category) }
+    /** Категории в порядке последнего изменения: сначала недавно правленные, затем остальные. */
+    val recentFirst: StateFlow<List<Category>> =
+        combine(repository.categories, settings.recentCategories) { all, recent ->
+            val byId = all.associateBy { it.id }
+            val fresh = recent.mapNotNull { byId[it] }
+            fresh + all.filterNot { it in fresh }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun save(category: Category) = viewModelScope.launch {
+        val id = repository.saveCategory(category)
+        settings.touchCategory(id)
+    }
     fun delete(id: Long) = viewModelScope.launch { repository.deleteCategory(id) }
 }
 

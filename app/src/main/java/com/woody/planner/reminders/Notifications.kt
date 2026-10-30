@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.woody.planner.MainActivity
@@ -89,6 +90,38 @@ object Notifications {
             // Разрешение отозвали между проверкой и показом — просто не показываем.
         }
     }
+
+    /** Пробное уведомление из настроек: так будут выглядеть и звучать напоминания. */
+    fun showTest(context: Context) {
+        if (!canPost(context)) return
+        ensureChannel(context)
+        val open = PendingIntent.getActivity(
+            context,
+            TEST_ID,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_woody)
+            .setColor(0xFFE63946.toInt())
+            .setContentTitle("Woody на связи")
+            .setContentText("Так будут приходить напоминания — со стуком дятла")
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(TEST_ID, notification)
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /** Не мешает ли системная оптимизация батареи будильникам (на ряде прошивок закрытые приложения «замораживаются»). */
+    fun isBatteryUnrestricted(context: Context): Boolean =
+        context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
+
+    private const val TEST_ID = Int.MAX_VALUE - 7
 
     fun cancel(context: Context, taskId: Long) {
         NotificationManagerCompat.from(context).cancel(taskId.toInt())

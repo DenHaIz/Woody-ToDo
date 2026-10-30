@@ -26,6 +26,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleIntent(intent)
+        // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
+        Notifications.ensureChannel(this)
         setContent {
             val mode by container.settings.themeMode.collectAsStateWithLifecycle(ThemeMode.System)
             val dark = when (mode) {

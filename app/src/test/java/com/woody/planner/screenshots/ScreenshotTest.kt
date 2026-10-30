@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -159,6 +161,37 @@ class ScreenshotTest {
     }
 
     @Test
+    fun editorPopups() {
+        seed()
+        render(dark = false)
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        listOf("Время" to "popup_time", "Напоминание" to "popup_reminder", "Дата" to "popup_date").forEach { (tile, name) ->
+            compose.onNodeWithText(tile).performClick()
+            compose.waitForIdle()
+            shot(name)
+            compose.onAllNodesWithContentDescription("Закрыть").onLast().performClick()
+            compose.waitForIdle()
+        }
+    }
+
+    @Test
+    fun settingsReveal() {
+        seed()
+        render(dark = false)
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.mainClock.advanceTimeBy(48)
+        shot("reveal_1")
+        compose.mainClock.advanceTimeBy(100)
+        shot("reveal_2")
+        compose.mainClock.advanceTimeBy(150)
+        shot("reveal_3")
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+    }
+
+    @Test
     fun editorDark() {
         seed()
         render(dark = true)
@@ -183,8 +216,12 @@ class ScreenshotTest {
         node.performTouchInput { up() }
         compose.mainClock.advanceTimeBy(64)
         shot("${name}_2_release")
-        compose.mainClock.advanceTimeBy(200)
-        shot("${name}_3_settle")
+        compose.mainClock.advanceTimeBy(120)
+        shot("${name}_3a_settle")
+        compose.mainClock.advanceTimeBy(120)
+        shot("${name}_3b_settle")
+        compose.mainClock.advanceTimeBy(160)
+        shot("${name}_3c_settle")
         compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         shot("${name}_4_done")

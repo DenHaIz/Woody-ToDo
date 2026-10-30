@@ -199,9 +199,11 @@ class TaskRepository(
 
     // --- Категории ---
 
-    suspend fun saveCategory(category: Category) {
+    /** Сохраняет категорию и возвращает её id (для новой — выданный базой). */
+    suspend fun saveCategory(category: Category): Long {
         val order = if (category.id == 0L) categoryDao.maxSortOrder() + 1 else category.sortOrder
-        categoryDao.upsert(category.copy(sortOrder = order).toEntity())
+        val rowId = categoryDao.upsert(category.copy(sortOrder = order).toEntity())
+        return if (category.id == 0L) rowId else category.id
     }
 
     suspend fun deleteCategory(id: Long) = categoryDao.delete(id)

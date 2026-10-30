@@ -4,8 +4,15 @@
 
     <!-- Только то, что нужно для напоминаний. Ни интернета, ни фоновых служб. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Точные будильники: на Android 13+ USE_EXACT_ALARM выдаётся сразу (приложение-напоминалка),
+         на Android 12 — SCHEDULE_EXACT_ALARM. Без них система откладывает напоминания на десятки минут. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Просьба не ограничивать приложение: часть прошивок иначе отменяет будильники закрытых приложений. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".WoodyApp"

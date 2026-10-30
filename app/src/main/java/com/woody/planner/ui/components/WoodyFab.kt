@@ -15,6 +15,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -37,6 +40,7 @@ fun WoodyFab(
     onOpenSettings: () -> Unit,
     showHint: Boolean,
     modifier: Modifier = Modifier,
+    onButtonBounds: (Rect) -> Unit = {},
 ) {
     val colors = WoodyTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -60,6 +64,7 @@ fun WoodyFab(
         Box(
             Modifier
                 .size(66.dp)
+                .onGloballyPositioned { onButtonBounds(it.boundsInRoot()) }
                 .semantics { contentDescription = "Добавить" }
                 .bouncyClickable(
                     pressedScale = 0.9f,
