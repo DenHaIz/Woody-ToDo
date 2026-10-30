@@ -9,6 +9,17 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +28,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -63,6 +73,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -82,7 +95,6 @@ import com.woody.planner.ui.components.MonthCalendar
 import com.woody.planner.ui.components.RuLocale
 import com.woody.planner.ui.components.WoodyChip
 import com.woody.planner.ui.components.bouncyClickable
-import com.woody.planner.ui.glass.liquidGlass
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
 import com.woody.planner.ui.theme.WoodyIcons
@@ -203,6 +215,20 @@ private fun EditorContent(
         onOpenParam(p, at)
     }
 
+    // Пока печатают, остаются дата, время и категория; остальное — за полоской «Дополнительно».
+    var titleFocused by remember { mutableStateOf(false) }
+    var noteFocused by remember { mutableStateOf(false) }
+    val typing = titleFocused || noteFocused
+    var moreOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(typing) { if (!typing) moreOpen = false }
+    // Клавиатуру спрятали жестом «назад» — снимаем фокус, чтобы плитки вернулись.
+    val imeVisible = WindowInsets.isImeVisible
+    var imeWasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(imeVisible) {
+        if (imeWasVisible && !imeVisible) focusManager.clearFocus()
+        imeWasVisible = imeVisible
+    }
+
     Column(
         Modifier
             .verticalScroll(rememberScrollState())
@@ -226,6 +252,7 @@ private fun EditorContent(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { titleFocused = it.isFocused }
                 .padding(vertical = 6.dp),
             imeAction = ImeAction.Done,
             onImeAction = { focusManager.clearFocus() },
@@ -237,6 +264,7 @@ private fun EditorContent(
             style = MaterialTheme.typography.bodyLarge.copy(color = colors.textSecondary),
             modifier = Modifier
                 .fillMaxWidth()
+                .onFocusChanged { noteFocused = it.isFocused }
                 .padding(bottom = 14.dp),
             singleLine = false,
         )
@@ -272,20 +300,26 @@ private fun EditorContent(
                 active = draft.subtasks.any { it.title.isNotBlank() },
             ),
         )
-        tiles.chunked(3).forEach { row ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                row.forEach { tile ->
-                    ParamTile(tile, onClick = { open(tile.param, it) }, modifier = Modifier.weight(1f))
-                }
-            }
+        val (main, extra) = tiles.chunked(3)
+        // Плитки большие, пока клавиатуры нет, и ужимаются вместе с её появлением.
+        val tileHeight by animateDpAsState(if (typing) 84.dp else 132.dp, TileSpring, label = "tileHeight")
+        TileRow(main, tileHeight, typing) { p, at -> open(p, at) }
+        AnimatedVisibility(
+            visible = !typing || moreOpen,
+            enter = expandVertically(TileSizeSpring, expandFrom = Alignment.Top) + fadeIn(TileFadeSpring),
+            exit = shrinkVertically(TileSizeSpring, shrinkTowards = Alignment.Top) + fadeOut(TileFadeSpring),
+        ) {
+            TileRow(extra, tileHeight, typing) { p, at -> open(p, at) }
+        }
+        AnimatedVisibility(
+            visible = typing && !moreOpen,
+            enter = expandVertically(TileSizeSpring, expandFrom = Alignment.Top) + fadeIn(TileFadeSpring),
+            exit = shrinkVertically(TileSizeSpring, shrinkTowards = Alignment.Top) + fadeOut(TileFadeSpring),
+        ) {
+            MoreStrip(extra) { moreOpen = true }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!isNew) {
                 Box(
@@ -336,9 +370,34 @@ private data class TileData(
     val emoji: String? = null,
 )
 
+private val TileSpring = spring<Dp>(dampingRatio = 1f, stiffness = 320f)
+private val TileSizeSpring = spring(dampingRatio = 1f, stiffness = 320f, visibilityThreshold = IntSize.VisibilityThreshold)
+private val TileFadeSpring = spring<Float>(dampingRatio = 1f, stiffness = 320f)
+
+@Composable
+private fun TileRow(tiles: List<TileData>, height: Dp, compact: Boolean, onOpen: (Param, Offset) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        tiles.forEach { tile ->
+            ParamTile(
+                tile = tile,
+                compact = compact,
+                onClick = { onOpen(tile.param, it) },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(height),
+            )
+        }
+    }
+}
+
 /** Скруглённый квадрат: значок, название параметра и его текущее значение. */
 @Composable
-private fun ParamTile(tile: TileData, onClick: (Offset) -> Unit, modifier: Modifier = Modifier) {
+private fun ParamTile(tile: TileData, compact: Boolean, onClick: (Offset) -> Unit, modifier: Modifier = Modifier) {
     val colors = WoodyTheme.colors
     val tint = tile.tint ?: colors.accent
     var center by remember { mutableStateOf(Offset.Unspecified) }
@@ -348,37 +407,79 @@ private fun ParamTile(tile: TileData, onClick: (Offset) -> Unit, modifier: Modif
         label = "tileBg",
     )
     val valueColor by animateColorAsState(if (tile.active) tint else colors.textPrimary, Motion.snappy(), label = "tileFg")
+    val iconSize by animateDpAsState(if (compact) 28.dp else 42.dp, TileSpring, label = "tileIcon")
     Column(
         modifier
-            .aspectRatio(1f)
+            .semantics(mergeDescendants = true) { contentDescription = tile.param.title }
             .onGloballyPositioned { center = it.boundsInRoot().center }
             .bouncyClickable(glowColor = tint, glowShape = TileShape) { onClick(center) }
             .clip(TileShape)
             .background(background)
-            .padding(12.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Box(
             Modifier
-                .size(34.dp)
+                .size(iconSize)
                 .background(if (tile.active) tint.copy(alpha = 0.18f) else colors.background.copy(alpha = 0.6f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             if (tile.emoji != null) {
-                Text(tile.emoji, fontSize = 18.sp)
+                Text(tile.emoji, fontSize = if (compact) 15.sp else 21.sp)
             } else {
-                Icon(tile.icon, contentDescription = null, tint = if (tile.active) tint else colors.textSecondary, modifier = Modifier.size(18.dp))
+                Icon(
+                    tile.icon,
+                    contentDescription = null,
+                    tint = if (tile.active) tint else colors.textSecondary,
+                    modifier = Modifier.size(iconSize * 0.5f),
+                )
             }
         }
         Column {
-            FitText(tile.param.title, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+            FitText(tile.param.title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, minSize = 9.sp)
             FitText(
                 tile.value,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                style = (if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge)
+                    .copy(fontWeight = FontWeight.SemiBold),
                 color = valueColor,
                 minSize = 10.sp,
             )
         }
+    }
+}
+
+/** Тонкая полоска вместо скрытых плиток: значки показывают, какие параметры уже заданы. */
+@Composable
+private fun MoreStrip(hidden: List<TileData>, onClick: () -> Unit) {
+    val colors = WoodyTheme.colors
+    Row(
+        Modifier
+            .padding(bottom = 10.dp)
+            .fillMaxWidth()
+            .height(38.dp)
+            .bouncyClickable(pressedScale = 0.97f, glowColor = colors.textPrimary, glowShape = Shapes.Pill, onClick = onClick)
+            .clip(Shapes.Pill)
+            .background(colors.chip)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            "Дополнительно",
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textSecondary,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        hidden.forEach { tile ->
+            Icon(
+                tile.icon,
+                contentDescription = null,
+                tint = if (tile.active) tile.tint ?: colors.accent else colors.textTertiary,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Icon(WoodyIcons.ChevronDown, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(18.dp))
     }
 }
 
@@ -396,7 +497,7 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
     LaunchedEffect(open != null) {
         progress.animateTo(
             if (open != null) 1f else 0f,
-            if (open != null) spring(dampingRatio = 0.78f, stiffness = 420f) else spring(dampingRatio = 1f, stiffness = 650f),
+            if (open != null) spring(dampingRatio = 0.82f, stiffness = 480f) else spring(dampingRatio = 1f, stiffness = 650f),
         )
     }
     val shown by remember { derivedStateOf { isOpen || progress.value > 0.001f } }
@@ -426,6 +527,7 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .testTag("param-window")
                     .onGloballyPositioned { bounds = it.boundsInRoot() }
                     .graphicsLayer {
                         val p = progress.value
@@ -434,12 +536,16 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
                         } else {
                             TransformOrigin.Center
                         }
-                        val s = 0.2f + 0.8f * p
+                        val s = 0.3f + 0.7f * p
                         scaleX = s
                         scaleY = s
                         alpha = (p * 1.8f).coerceIn(0f, 1f)
                     }
-                    .liquidGlass(Shapes.Panel, tint = colors.background.copy(alpha = if (colors.isDark) 0.86f else 0.8f))
+                    // Плотная поверхность без размытия: окно всегда читается и не зависит от шейдера стекла.
+                    .shadow(24.dp, Shapes.Panel, clip = false)
+                    .clip(Shapes.Panel)
+                    .background(colors.background)
+                    .border(1.dp, colors.cardBorder, Shapes.Panel)
                     .clickable(interactionSource = null, indication = null) { /* тапы внутри окна не закрывают его */ }
                     .heightIn(max = 640.dp)
                     .verticalScroll(rememberScrollState())

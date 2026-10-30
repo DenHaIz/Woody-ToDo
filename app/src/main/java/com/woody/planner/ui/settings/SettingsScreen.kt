@@ -4,7 +4,8 @@ import android.annotation.SuppressLint
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -123,7 +124,8 @@ fun SettingsPage(
     LaunchedEffect(visible) {
         progress.animateTo(
             if (visible) 1f else 0f,
-            if (visible) spring(dampingRatio = 0.86f, stiffness = 260f) else spring(dampingRatio = 1f, stiffness = 380f),
+            // Раскрытие — длинное и плавное (замедляется к концу), сворачивание — чуть быстрее.
+            if (visible) tween(620, easing = RevealEasing) else tween(460, easing = CollapseEasing),
         )
     }
     val isVisible by rememberUpdatedState(visible)
@@ -173,7 +175,7 @@ fun SettingsPage(
                 .drawWithContent {
                     drawContent()
                     // В начале раскрытия (и в конце сворачивания) страница в цвете кнопки — «+» перетекает в экран.
-                    val tint = (1f - progress.value / 0.45f).coerceIn(0f, 1f)
+                    val tint = (1f - progress.value / 0.5f).coerceIn(0f, 1f)
                     if (tint > 0f) drawRect(accent.copy(alpha = tint))
                 },
         ) {
@@ -219,6 +221,9 @@ fun SettingsPage(
         }
     }
 }
+
+private val RevealEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val CollapseEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 
 /** Скруглённый прямоугольник, растущий из [from] (кнопка) до размеров экрана по [progress]. */
 private class RevealShape(private val from: Rect, private val progress: Float, private val extraCorner: Float) : Shape {

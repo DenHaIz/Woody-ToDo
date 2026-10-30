@@ -6,6 +6,11 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
@@ -153,6 +158,45 @@ class InteractionTest {
         compose.waitForIdle()
         compose.onAllNodesWithText("Категория").assertCountEquals(1)
         compose.onNodeWithText("Спорт").assertExists()
+    }
+
+    @Test
+    fun everyTileOpensItsWindowOnNewTask() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        // Сначала печатаем название — как обычно и делают — затем по очереди открываем все параметры.
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Спортзал")
+        compose.waitForIdle()
+        listOf("Дата", "Время", "Категория", "Напоминание", "Повтор", "Чек-лист").forEach { title ->
+            if (compose.onAllNodesWithText("Дополнительно").fetchSemanticsNodes().isNotEmpty()) {
+                compose.onNodeWithText("Дополнительно").performClick()
+                compose.waitForIdle()
+            }
+            compose.onNodeWithContentDescription(title).performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("param-window").assertExists()
+            compose.onAllNodesWithContentDescription("Закрыть").onLast().performClick()
+            compose.waitForIdle()
+            compose.onAllNodesWithTag("param-window").assertCountEquals(0)
+        }
+    }
+
+    @Test
+    fun typingCollapsesExtraTilesIntoStrip() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Повтор").assertExists()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.waitForIdle()
+        // При вводе текста остаются дата, время и категория; остальное — за полоской «Дополнительно».
+        compose.onNodeWithContentDescription("Дата").assertExists()
+        compose.onAllNodesWithContentDescription("Повтор").assertCountEquals(0)
+        compose.onNodeWithText("Дополнительно").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Повтор").assertExists()
     }
 
     @Test

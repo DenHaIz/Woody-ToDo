@@ -11,6 +11,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -173,6 +175,20 @@ class ScreenshotTest {
             compose.onAllNodesWithContentDescription("Закрыть").onLast().performClick()
             compose.waitForIdle()
         }
+    }
+
+    @Test
+    fun editorTyping() {
+        seed()
+        render(dark = false)
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.waitForIdle()
+        shot("editor_typing")
+        compose.onNodeWithText("Дополнительно").performClick()
+        compose.waitForIdle()
+        shot("editor_typing_more")
     }
 
     @Test
