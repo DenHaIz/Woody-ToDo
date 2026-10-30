@@ -1,6 +1,9 @@
 package com.woody.planner.reminders
 
 import android.app.NotificationChannel
+import android.content.ContentResolver
+import android.media.AudioAttributes
+import androidx.core.net.toUri
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -15,15 +18,28 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 object Notifications {
-    private const val CHANNEL_ID = "reminders"
+    // Звук канала нельзя поменять после создания, поэтому у канала со стуком дятла — новый id.
+    private const val CHANNEL_ID = "reminders_knock"
+    private const val LEGACY_CHANNEL_ID = "reminders"
     const val EXTRA_OPEN_DAY = "open_day"
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        val sound = "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.woody_knock}".toUri()
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Напоминания о задачах", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Уведомления в заданное время"
+                description = "Уведомления в заданное время со стуком дятла"
+                setSound(
+                    sound,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 40, 60, 40, 60, 40)
             },
         )
     }

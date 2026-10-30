@@ -52,9 +52,22 @@ fun WoodyChip(
 
 /** Маленькая метка в строке задачи: время, категория, количество подзадач. */
 @Composable
-fun MetaTag(text: String, modifier: Modifier = Modifier, icon: ImageVector? = null, color: Color = WoodyTheme.colors.textSecondary) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(13.dp))
-        if (text.isNotEmpty()) Text(text, color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+fun MetaTag(
+    text: String,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    color: Color = WoodyTheme.colors.textSecondary,
+    large: Boolean = false,
+) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (large) 5.dp else 3.dp)) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(if (large) 18.dp else 13.dp))
+        if (text.isNotEmpty()) {
+            Text(
+                text,
+                color = color,
+                style = if (large) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
     }
 }

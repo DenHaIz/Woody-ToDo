@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -32,7 +33,10 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.woody.planner.ui.components.balanced
 import com.woody.planner.domain.SubtaskItem
 import com.woody.planner.domain.TaskItem
 import com.woody.planner.ui.components.AnimatedCheckbox
@@ -47,6 +51,8 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.min
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
+private val TitleStyle = TextStyle(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold)
+private val LargeTitleStyle = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
 private val ShortDateFormat = DateTimeFormatter.ofPattern("d MMM", RuLocale)
 
 @Composable
@@ -56,6 +62,8 @@ fun TaskCard(
     onToggleSubtask: (SubtaskItem) -> Unit,
     onEdit: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Крупная карточка — когда задач в дне мало и места много. */
+    large: Boolean = false,
 ) {
     val colors = WoodyTheme.colors
     val haptics = LocalHapticFeedback.current
@@ -65,7 +73,12 @@ fun TaskCard(
     val alpha = animateFloatAsState(if (item.done) 0.6f else 1f, Motion.soft(), label = "doneAlpha")
     val chevron = animateFloatAsState(if (expanded) 180f else 0f, Motion.bouncy(), label = "chevron")
 
-    FrostedCard(modifier.fillMaxWidth().graphicsLayer { this.alpha = alpha.value }) {
+    FrostedCard(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = if (large) 112.dp else 88.dp)
+            .graphicsLayer { this.alpha = alpha.value },
+    ) {
         Column(
             Modifier
                 .combinedClickable(
@@ -78,18 +91,24 @@ fun TaskCard(
                     onClick = { if (expandable) expanded = !expanded else onEdit() },
                 )
                 .animateContentSize(Motion.soft())
-                .padding(start = 4.dp, end = 14.dp, top = 6.dp, bottom = 6.dp),
+                .padding(start = 6.dp, end = 16.dp, top = if (large) 16.dp else 12.dp, bottom = if (large) 16.dp else 12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AnimatedCheckbox(checked = item.done, color = categoryColor, onToggle = onToggle)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = if (large) 80.dp else 64.dp)) {
+                AnimatedCheckbox(
+                    checked = item.done,
+                    color = categoryColor,
+                    onToggle = onToggle,
+                    size = if (large) 38.dp else 30.dp,
+                    touchSize = if (large) 60.dp else 50.dp,
+                )
                 Column(
                     Modifier
                         .weight(1f)
                         .padding(vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    StrikeText(item.title, struck = item.done, style = MaterialTheme.typography.titleMedium)
-                    TaskMeta(item)
+                    StrikeText(item.title, struck = item.done, style = (if (large) LargeTitleStyle else TitleStyle).balanced())
+                    TaskMeta(item, large)
                 }
                 if (expandable) {
                     Icon(
@@ -103,7 +122,7 @@ fun TaskCard(
                 }
             }
             if (expanded) {
-                Column(Modifier.padding(start = 44.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(Modifier.padding(start = 48.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (item.note.isNotBlank()) {
                         Text(
                             item.note,
@@ -121,7 +140,7 @@ fun TaskCard(
                                 size = 18.dp,
                                 touchSize = 34.dp,
                             )
-                            StrikeText(sub.title, struck = sub.done, style = MaterialTheme.typography.bodyLarge)
+                            StrikeText(sub.title, struck = sub.done, style = MaterialTheme.typography.bodyLarge.balanced())
                         }
                     }
                     Text(
@@ -140,22 +159,25 @@ fun TaskCard(
 }
 
 @Composable
-private fun TaskMeta(item: TaskItem) {
+private fun TaskMeta(item: TaskItem, large: Boolean) {
     val colors = WoodyTheme.colors
     val hasMeta = item.time != null || item.overdue || item.category != null || item.isRecurring ||
         item.hasReminder || item.subtasks.isNotEmpty()
     if (!hasMeta) return
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(if (large) 14.dp else 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         if (item.overdue) {
-            MetaTag(item.day.format(ShortDateFormat), icon = WoodyIcons.Calendar, color = colors.warning)
+            MetaTag(item.day.format(ShortDateFormat), icon = WoodyIcons.Calendar, color = colors.warning, large = large)
         }
-        item.time?.let { MetaTag(it.format(TimeFormat), icon = WoodyIcons.Clock) }
-        item.category?.let { MetaTag("${it.emoji} ${it.name}") }
+        item.time?.let { MetaTag(it.format(TimeFormat), icon = WoodyIcons.Clock, large = large) }
+        item.category?.let { MetaTag("${it.emoji} ${it.name}", large = large) }
         if (item.subtasks.isNotEmpty()) {
-            MetaTag("${item.subtasksDone}/${item.subtasks.size}", icon = WoodyIcons.Checklist)
+            MetaTag("${item.subtasksDone}/${item.subtasks.size}", icon = WoodyIcons.Checklist, large = large)
         }
-        if (item.isRecurring) MetaTag("", icon = WoodyIcons.Repeat)
-        if (item.hasReminder) MetaTag("", icon = WoodyIcons.Bell)
+        if (item.isRecurring) MetaTag("", icon = WoodyIcons.Repeat, large = large)
+        if (item.hasReminder) MetaTag("", icon = WoodyIcons.Bell, large = large)
     }
 }
 

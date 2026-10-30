@@ -11,7 +11,10 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,12 +54,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.woody.planner.R
 import com.woody.planner.domain.DayAgenda
 import com.woody.planner.domain.TaskItem
+import com.woody.planner.ui.components.FitText
 import com.woody.planner.ui.components.MonthCalendar
 import com.woody.planner.ui.components.ProgressRing
 import com.woody.planner.ui.components.RuLocale
@@ -71,6 +76,7 @@ import com.woody.planner.ui.theme.Shapes
 import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.flow.drop
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -97,14 +103,26 @@ fun DayScreen(
     fun pageOf(day: LocalDate) = DAY_START_PAGE + ChronoUnit.DAYS.between(baseDay, day).toInt()
     val pager = rememberPagerState(initialPage = pageOf(selected)) { DAY_PAGES }
 
-    // Свайп страниц → выбранный день (после остановки, чтобы не дёргать шапку на полпути).
+    // Программная прокрутка (выбор в ленте/календаре) не должна менять выбранный день на промежуточных страницах.
+    var programmaticScroll by remember { mutableStateOf(false) }
+    // Свайп страниц → выбранный день сразу, как страница перевалила за середину: шапка отзывается мгновенно.
     LaunchedEffect(pager) {
-        snapshotFlow { pager.settledPage }.collect { vm.select(baseDay.plusDays((it - DAY_START_PAGE).toLong())) }
+        // drop(1): стартовая страница уже соответствует выбранному дню и не должна перебивать переход из уведомления.
+        snapshotFlow { pager.currentPage }.drop(1).collect {
+            if (!programmaticScroll) vm.select(baseDay.plusDays((it - DAY_START_PAGE).toLong()))
+        }
     }
     // Выбор дня в ленте/календаре → плавная прокрутка страниц.
     LaunchedEffect(selected) {
         val target = pageOf(selected)
-        if (pager.currentPage != target) pager.animateScrollToPage(target, animationSpec = Motion.soft())
+        if (pager.currentPage != target && !pager.isScrollInProgress) {
+            programmaticScroll = true
+            try {
+                pager.animateScrollToPage(target, animationSpec = Motion.soft())
+            } finally {
+                programmaticScroll = false
+            }
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -130,11 +148,12 @@ fun DayScreen(
             vm = vm,
             selected = selected,
             today = today,
+            // Размер меряем снаружи отступов: в высоту шапки входит и статус-бар.
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .onSizeChanged { headerHeight = it.height }
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .onSizeChanged { headerHeight = it.height },
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
 }
@@ -157,7 +176,8 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
             Column(
                 Modifier
                     .weight(1f)
-                    .bouncyClickable(pressedScale = 0.97f) {
+                    // Без «вдавливания»: панель целиком плавно раскрывает календарь.
+                    .clickable(interactionSource = null, indication = null) {
                         if (!expanded) month = YearMonth.from(selected)
                         expanded = !expanded
                     },
@@ -173,9 +193,16 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                     label = "title",
                 ) { day ->
                     Column {
-                        Text(dayTitle(day, today), style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
+                        FitText(dayTitle(day, today), style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(daySubtitle(day, today), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                            Text(
+                                daySubtitle(day, today),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
                             Icon(
                                 WoodyIcons.ChevronDown,
                                 contentDescription = if (expanded) "Свернуть календарь" else "Открыть календарь",
@@ -185,36 +212,41 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                                     .size(16.dp)
                                     .graphicsLayer { rotationZ = chevron.value },
                             )
+                            AnimatedVisibility(
+                                visible = day != today,
+                                enter = scaleIn(Motion.bouncy()) + fadeIn(),
+                                exit = scaleOut(Motion.snappy()) + fadeOut(),
+                            ) {
+                                Text(
+                                    "Сегодня",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.accent,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .padding(start = 8.dp)
+                                        .bouncyClickable { vm.select(today) }
+                                        .clip(Shapes.Pill)
+                                        .background(colors.accent.copy(alpha = 0.12f))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
                         }
                     }
                 }
             }
-            AnimatedVisibility(
-                visible = selected != today,
-                enter = scaleIn(Motion.bouncy()) + fadeIn(),
-                exit = scaleOut(Motion.snappy()) + fadeOut(),
-            ) {
-                Text(
-                    "Сегодня",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accent,
-                    modifier = Modifier
-                        .padding(end = 10.dp)
-                        .bouncyClickable { vm.select(today) }
-                        .clip(Shapes.Pill)
-                        .background(colors.accent.copy(alpha = 0.12f))
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                )
-            }
+            Spacer(Modifier.width(10.dp))
             ProgressRing(done = agenda?.doneCount ?: 0, total = agenda?.total ?: 0)
         }
         Spacer(Modifier.height(10.dp))
+        // Высота панели меняется пружиной от верхнего края, а уходящий вид обрезается по панели —
+        // стекло плавно растёт и сжимается, без перекосов.
         AnimatedContent(
             targetState = expanded,
             transitionSpec = {
-                (fadeIn(Motion.snappy()) + scaleIn(Motion.soft(), initialScale = 0.96f)) togetherWith
-                    fadeOut(Motion.snappy()) using SizeTransform(clip = false) { _, _ -> Motion.soft() }
+                fadeIn(tween(220, delayMillis = 90)) togetherWith fadeOut(tween(90)) using
+                    SizeTransform(clip = true) { _, _ -> spring(dampingRatio = 0.85f, stiffness = 380f) }
             },
+            contentAlignment = Alignment.TopCenter,
             label = "calendar",
         ) { showMonth ->
             if (showMonth) {
@@ -260,6 +292,8 @@ private fun DayPage(
     var doneExpanded by rememberSaveable(day) { mutableStateOf(true) }
     val current = agenda ?: return
     val warning = WoodyTheme.colors.warning
+    // Мало задач — карточки крупнее, места на экране хватает.
+    val large = current.total + current.overdue.size <= 3
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -269,14 +303,14 @@ private fun DayPage(
         if (current.isEmpty) {
             item(key = "empty") { EmptyDay(Modifier.animateItem()) }
         }
-        taskSection("overdue", "Просрочено", current.overdue, vm, onEditTask, warning)
-        taskSection("timed", "По расписанию", current.timed, vm, onEditTask)
-        taskSection("untimed", if (current.timed.isEmpty()) "Задачи" else "В течение дня", current.untimed, vm, onEditTask)
+        taskSection("overdue", "Просрочено", current.overdue, vm, onEditTask, large, warning)
+        taskSection("timed", "По расписанию", current.timed, vm, onEditTask, large)
+        taskSection("untimed", if (current.timed.isEmpty()) "Задачи" else "В течение дня", current.untimed, vm, onEditTask, large)
         if (current.done.isNotEmpty()) {
             item(key = "header-done") {
                 DoneHeader(current, doneExpanded, { doneExpanded = !doneExpanded }, Modifier.animateItem())
             }
-            if (doneExpanded) taskItems(current.done, vm, onEditTask)
+            if (doneExpanded) taskItems(current.done, vm, onEditTask, large)
         }
     }
 }
@@ -287,17 +321,18 @@ private fun LazyListScope.taskSection(
     tasks: List<TaskItem>,
     vm: DayViewModel,
     onEditTask: (Long) -> Unit,
+    large: Boolean,
     accent: androidx.compose.ui.graphics.Color? = null,
 ) {
     if (tasks.isEmpty()) return
     item(key = "header-$key") {
         SectionHeader(title, Modifier.animateItem(), accent)
     }
-    taskItems(tasks, vm, onEditTask)
+    taskItems(tasks, vm, onEditTask, large)
 }
 
-private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onEditTask: (Long) -> Unit) {
-    items(tasks, key = { "task-${it.taskId}-${it.day.toEpochDay()}" }) { item ->
+private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onEditTask: (Long) -> Unit, large: Boolean) {
+    items(tasks, key = { "task-${it.taskId}-${it.day.toEpochDay()}" }, contentType = { "task" }) { item ->
         val colors = WoodyTheme.colors
         SwipeableTaskCard(
             modifier = Modifier.animateItem(
@@ -324,6 +359,7 @@ private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onE
                 onToggle = { vm.toggleDone(item) },
                 onToggleSubtask = { vm.toggleSubtask(item, it) },
                 onEdit = { onEditTask(item.taskId) },
+                large = large,
             )
         }
     }

@@ -88,98 +88,6 @@ val CategoryEmoji = listOf(
     "🎁", "💰", "📞", "🎨", "🎵", "⚽", "👶", "🌳",
 )
 
-@Composable
-fun CategoriesScreen(vm: CategoriesViewModel, bottomInset: Dp, onEdit: (Category?) -> Unit) {
-    val colors = WoodyTheme.colors
-    val categories by vm.categories.collectAsStateWithLifecycle()
-    val counts by vm.counts.collectAsStateWithLifecycle()
-    val hazeState = LocalHazeState.current
-    val density = LocalDensity.current
-    var headerHeight by remember { mutableIntStateOf(0) }
-
-    Box(Modifier.fillMaxSize()) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            modifier = Modifier
-                .fillMaxSize()
-                .then(if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f) else Modifier),
-            contentPadding = PaddingValues(
-                start = 14.dp,
-                end = 14.dp,
-                top = with(density) { headerHeight.toDp() } + 12.dp,
-                bottom = bottomInset + 24.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            items(categories, key = { it.id }) { category ->
-                CategoryTile(category, counts[category.id] ?: 0, Modifier.animateItem()) { onEdit(category) }
-            }
-            item(key = "add", span = { GridItemSpan(1) }) {
-                FrostedCard(
-                    Modifier
-                        .animateItem()
-                        .height(128.dp)
-                        .bouncyClickable { onEdit(null) },
-                    color = colors.card.copy(alpha = colors.card.alpha * 0.5f),
-                ) {
-                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(WoodyIcons.Plus, contentDescription = null, tint = colors.accent)
-                        Spacer(Modifier.height(6.dp))
-                        Text("Новая", style = MaterialTheme.typography.labelLarge, color = colors.accent)
-                    }
-                }
-            }
-        }
-
-        Column(
-            Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                .onSizeChanged { headerHeight = it.height }
-                .fillMaxWidth()
-                .liquidGlass(Shapes.Panel)
-                .padding(horizontal = 18.dp, vertical = 16.dp),
-        ) {
-            Text("Категории", style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
-            Text(
-                "Цвет и значок помогают быстро находить задачи",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary,
-            )
-        }
-    }
-}
-
-@Composable
-private fun CategoryTile(category: Category, count: Int, modifier: Modifier, onClick: () -> Unit) {
-    val colors = WoodyTheme.colors
-    val color = Color(category.colorArgb)
-    FrostedCard(modifier.height(128.dp).bouncyClickable(onClick = onClick)) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .background(color.copy(alpha = 0.18f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(category.emoji, fontSize = 22.sp)
-            }
-            Spacer(Modifier.weight(1f))
-            Text(category.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, maxLines = 1)
-            Text(tasksWord(count), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        }
-        Box(
-            Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-                .size(10.dp)
-                .background(color, CircleShape),
-        )
-    }
-}
-
 /** Лист создания/редактирования категории. [category] с id = 0 — новая. */
 @Composable
 fun CategoryEditorSheet(
@@ -299,7 +207,7 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
     }
 }
 
-private fun tasksWord(n: Int): String {
+fun tasksWord(n: Int): String {
     val mod100 = n % 100
     val mod10 = n % 10
     val word = when {
