@@ -51,6 +51,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.woody.planner.AppContainer
+import com.woody.planner.data.AppLanguage
+import com.woody.planner.ui.i18n.plural
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.domain.Category
 import com.woody.planner.ui.components.GlassSheet
 import com.woody.planner.ui.components.bouncyClickable
@@ -152,7 +155,7 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
                 decorationBox = { inner ->
                     Box {
                         if (draft.name.isEmpty()) {
-                            Text("Название", style = MaterialTheme.typography.headlineSmall, color = colors.textTertiary)
+                            Text(tr("Название", "Name"), style = MaterialTheme.typography.headlineSmall, color = colors.textTertiary)
                         }
                         inner()
                     }
@@ -160,7 +163,7 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
             )
         }
 
-        Text("ЦВЕТ", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
+        Text(tr("ЦВЕТ", "COLOR"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CategoryPalette.forEach { argb ->
                 val selected = draft.colorArgb == argb
@@ -179,7 +182,7 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
             }
         }
 
-        Text("ЗНАЧОК", style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
+        Text(tr("ЗНАЧОК", "ICON"), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.padding(top = 20.dp, bottom = 10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             CategoryEmoji.forEach { emoji ->
                 val selected = draft.emoji == emoji
@@ -208,7 +211,7 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
                         .background(colors.accent.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(WoodyIcons.Trash, contentDescription = "Удалить категорию", tint = colors.accent)
+                    Icon(WoodyIcons.Trash, contentDescription = tr("Удалить категорию", "Delete category"), tint = colors.accent)
                 }
             }
             val enabled = draft.name.isNotBlank()
@@ -221,20 +224,11 @@ private fun CategoryEditorContent(initial: Category, onSave: (Category) -> Unit,
                     .background(if (enabled) accent else colors.textTertiary.copy(alpha = 0.4f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (initial.id == 0L) "Создать" else "Сохранить", style = MaterialTheme.typography.labelLarge, color = Color.White)
+                Text(if (initial.id == 0L) tr("Создать", "Create") else tr("Сохранить", "Save"), style = MaterialTheme.typography.labelLarge, color = Color.White)
             }
         }
     }
 }
 
-fun tasksWord(n: Int): String {
-    val mod100 = n % 100
-    val mod10 = n % 10
-    val word = when {
-        mod100 in 11..14 -> "задач"
-        mod10 == 1 -> "задача"
-        mod10 in 2..4 -> "задачи"
-        else -> "задач"
-    }
-    return if (n == 0) "Нет задач" else "$n $word"
-}
+fun tasksWord(n: Int, lang: AppLanguage): String =
+    if (n == 0) lang.pick("Нет задач", "No tasks") else "$n " + lang.plural(n, "задача", "задачи", "задач", "task", "tasks")

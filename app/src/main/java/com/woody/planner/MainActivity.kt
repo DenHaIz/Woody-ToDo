@@ -6,14 +6,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.woody.planner.data.ThemeMode
 import com.woody.planner.reminders.Notifications
 import com.woody.planner.ui.WoodyAppShell
+import com.woody.planner.ui.i18n.LocalLanguage
 import com.woody.planner.ui.theme.WoodyTheme
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -26,21 +32,31 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         handleIntent(intent)
-        // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
-        Notifications.ensureChannel(this)
+        lifecycleScope.launch(Dispatchers.IO) {
+            // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
+            Notifications.ensureChannel(this@MainActivity, container.settings.language.first())
+            // Принудительная остановка (или «очистка» на некоторых прошивках) стирает будильники —
+            // при каждом запуске ставим их заново. Это один запрос к базе.
+            container.reminders.rescheduleAll()
+        }
         setContent {
-            val mode by container.settings.themeMode.collectAsStateWithLifecycle(ThemeMode.System)
+            val language by container.settings.language.collectAsStateWithLifecycle(null)
+            val savedMode by container.settings.themeMode.collectAsStateWithLifecycle(null)
+            // Пока настройки читаются (миллисекунды), показываем фон окна — без мелькания чужого языка и темы.
+            val mode = savedMode ?: return@setContent
             val dark = when (mode) {
                 ThemeMode.System -> isSystemInDarkTheme()
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true
             }
-            WoodyTheme(darkTheme = dark) {
-                WoodyAppShell(
-                    container = container,
-                    openDayRequest = openDayRequest.value,
-                    onOpenDayHandled = { openDayRequest.value = null },
-                )
+            CompositionLocalProvider(LocalLanguage provides (language ?: return@setContent)) {
+                WoodyTheme(darkTheme = dark) {
+                    WoodyAppShell(
+                        container = container,
+                        openDayRequest = openDayRequest.value,
+                        onOpenDayHandled = { openDayRequest.value = null },
+                    )
+                }
             }
         }
     }

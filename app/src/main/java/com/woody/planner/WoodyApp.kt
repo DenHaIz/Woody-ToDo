@@ -18,7 +18,7 @@ class WoodyApp : Application() {
 /** Ручной DI: все зависимости создаются лениво, при первом обращении. */
 class AppContainer(context: Context) {
     val database: WoodyDatabase by lazy { WoodyDatabase.create(context) }
-    val reminders: ReminderScheduler by lazy { ReminderScheduler(context) { database.taskDao() } }
+    val reminders: ReminderScheduler by lazy { ReminderScheduler(context, { database.taskDao() }, { settings }) }
     val repository: TaskRepository by lazy { TaskRepository(database, reminders) }
     val settings: SettingsRepository by lazy { SettingsRepository(context) }
 

@@ -207,4 +207,21 @@ class TaskRepository(
     }
 
     suspend fun deleteCategory(id: Long) = categoryDao.delete(id)
+
+    /** Стартовые категории, которые пользователь не переименовал, переводятся вместе с интерфейсом. */
+    suspend fun translateDefaultCategories(lang: AppLanguage) {
+        DefaultCategoryNames.forEach { (ru, en) ->
+            if (lang == AppLanguage.English) categoryDao.rename(ru, en) else categoryDao.rename(en, ru)
+        }
+    }
+
+    private companion object {
+        val DefaultCategoryNames = listOf(
+            "Спорт" to "Sport",
+            "Покупки" to "Shopping",
+            "Дом" to "Home",
+            "Работа" to "Work",
+            "Здоровье" to "Health",
+        )
+    }
 }

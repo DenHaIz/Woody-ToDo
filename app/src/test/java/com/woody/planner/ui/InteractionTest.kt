@@ -24,7 +24,14 @@ import androidx.compose.ui.test.swipeRight
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.woody.planner.WoodyApp
+import com.woody.planner.data.AppLanguage
 import com.woody.planner.data.SwipeStyle
+import com.woody.planner.ui.i18n.LocalLanguage
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.performScrollTo
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.first
 import com.woody.planner.data.TaskDraft
 import com.woody.planner.ui.theme.WoodyTheme
 import kotlinx.coroutines.runBlocking
@@ -53,8 +60,12 @@ class InteractionTest {
             container.repository.save(TaskDraft(title = "Разобрать почту", date = today))
         }
         compose.setContent {
-            WoodyTheme(darkTheme = false) {
-                WoodyAppShell(container, openDayRequest = null, onOpenDayHandled = {})
+            // Как в MainActivity: язык берётся из настроек и меняется на лету.
+            val lang by container.settings.language.collectAsStateWithLifecycle(AppLanguage.Russian)
+            CompositionLocalProvider(LocalLanguage provides lang) {
+                WoodyTheme(darkTheme = false) {
+                    WoodyAppShell(container, openDayRequest = null, onOpenDayHandled = {})
+                }
             }
         }
         compose.waitForIdle()
@@ -212,5 +223,39 @@ class InteractionTest {
         compose.waitForIdle()
         compose.onNodeWithText("Здоровье").assertExists()
         compose.onNodeWithText("Свернуть").assertExists()
+    }
+
+    @Test
+    fun languageSwitchesWholeInterfaceAtOnce() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        compose.onNodeWithText("English").performScrollTo().performClick()
+        awaitText("Settings")
+        compose.onNodeWithText("LANGUAGE").assertExists()
+        compose.onNodeWithText("CATEGORIES").assertExists()
+        // Нетронутые стартовые категории переведены вместе с интерфейсом.
+        awaitText("Sport")
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.waitForIdle()
+        // День за настройками тоже уже на английском.
+        compose.onNodeWithText("Today").assertExists()
+        compose.onNodeWithContentDescription("Add").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("New task").assertExists()
+        compose.onNodeWithContentDescription("Reminder").assertExists()
+        runBlocking { container.settings.setLanguage(AppLanguage.Russian) }
+    }
+
+    @Test
+    fun alarmModeToggleReschedules() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        compose.onNodeWithText("Как будильник").performScrollTo().performClick()
+        compose.waitUntil(5_000) { runBlocking { !container.settings.alarmClockReminders.first() } }
+        awaitText("Обычный точный будильник, без значка")
+        compose.onNodeWithText("Как будильник").performClick()
+        compose.waitUntil(5_000) { runBlocking { container.settings.alarmClockReminders.first() } }
     }
 }

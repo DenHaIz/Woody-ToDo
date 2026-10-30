@@ -53,6 +53,7 @@ import com.woody.planner.ui.editor.EditorViewModel
 import com.woody.planner.ui.editor.TaskEditorSheet
 import com.woody.planner.ui.glass.LocalHazeState
 import com.woody.planner.ui.glass.liquidGlass
+import com.woody.planner.ui.i18n.LocalLanguage
 import com.woody.planner.ui.settings.SettingsPage
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
@@ -91,6 +92,7 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var fabBounds by remember { mutableStateOf(Rect.Zero) }
     var hint by remember { mutableStateOf<Message?>(null) }
+    val lang = LocalLanguage.current
     var showFabHint by remember { mutableStateOf(false) }
 
     val openNotificationSettings = {
@@ -100,7 +102,7 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
     }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) {
-            hint = Message(System.nanoTime(), "Уведомления выключены", "Настройки", openNotificationSettings)
+            hint = Message(System.nanoTime(), lang.pick("Уведомления выключены", "Notifications are off"), lang.pick("Настройки", "Settings"), openNotificationSettings)
         }
     }
     val requestNotifications = {
@@ -111,7 +113,7 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
         if (!Notifications.canPost(context)) {
             requestNotifications()
         } else if (!container.reminders.canScheduleExact) {
-            hint = Message(System.nanoTime(), "Разрешите точное время", "Открыть") {
+            hint = Message(System.nanoTime(), lang.pick("Разрешите точное время", "Allow exact timing"), lang.pick("Открыть", "Open")) {
                 context.startActivity(
                     Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, "package:${context.packageName}".toUri()),
                 )
@@ -152,7 +154,7 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
 
             DayScreen(dayVm, onEditTask = { editorVm.openEdit(it) }, bottomInset = bottomInset)
 
-            val undoMessage = undo?.let { Message(it.id, it.message, "Отменить") { dayVm.performUndo() } }
+            val undoMessage = undo?.let { Message(it.id, it.message(lang), lang.pick("Отменить", "Undo")) { dayVm.performUndo() } }
             MessageBar(
                 message = hint ?: undoMessage,
                 onTimeout = { id ->

@@ -41,7 +41,9 @@ import com.woody.planner.domain.SubtaskItem
 import com.woody.planner.domain.TaskItem
 import com.woody.planner.ui.components.AnimatedCheckbox
 import com.woody.planner.ui.components.MetaTag
-import com.woody.planner.ui.components.RuLocale
+import com.woody.planner.ui.i18n.LocalLanguage
+import com.woody.planner.ui.i18n.dayMonthShort
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.ui.components.bouncyClickable
 import com.woody.planner.ui.glass.FrostedCard
 import com.woody.planner.ui.theme.Motion
@@ -53,7 +55,6 @@ import kotlin.math.min
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 private val TitleStyle = TextStyle(fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold)
 private val LargeTitleStyle = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
-private val ShortDateFormat = DateTimeFormatter.ofPattern("d MMM", RuLocale)
 
 @Composable
 fun TaskCard(
@@ -113,7 +114,7 @@ fun TaskCard(
                 if (expandable) {
                     Icon(
                         WoodyIcons.ChevronDown,
-                        contentDescription = if (expanded) "Свернуть" else "Развернуть",
+                        contentDescription = if (expanded) tr("Свернуть", "Collapse") else tr("Развернуть", "Expand"),
                         tint = colors.textTertiary,
                         modifier = Modifier
                             .size(20.dp)
@@ -144,7 +145,7 @@ fun TaskCard(
                         }
                     }
                     Text(
-                        "Изменить",
+                        tr("Изменить", "Edit"),
                         style = MaterialTheme.typography.labelLarge,
                         color = colors.accent,
                         modifier = Modifier
@@ -169,7 +170,7 @@ private fun TaskMeta(item: TaskItem, large: Boolean) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (item.overdue) {
-            MetaTag(item.day.format(ShortDateFormat), icon = WoodyIcons.Calendar, color = colors.warning, large = large)
+            MetaTag(LocalLanguage.current.dayMonthShort(item.day), icon = WoodyIcons.Calendar, color = colors.warning, large = large)
         }
         item.time?.let { MetaTag(it.format(TimeFormat), icon = WoodyIcons.Clock, large = large) }
         item.category?.let { MetaTag("${it.emoji} ${it.name}", large = large) }

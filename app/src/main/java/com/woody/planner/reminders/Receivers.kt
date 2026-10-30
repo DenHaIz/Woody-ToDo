@@ -9,6 +9,7 @@ import com.woody.planner.data.toDomain
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -28,7 +29,7 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val container = (context.applicationContext as WoodyApp).container
         if (intent.action == ACTION_TEST) {
-            Notifications.showTest(context)
+            runAsync { Notifications.showTest(context, container.settings.language.first()) }
             return
         }
         val taskId = intent.getLongExtra(EXTRA_TASK_ID, -1L).takeIf { it >= 0 } ?: return
@@ -41,7 +42,7 @@ class ReminderReceiver : BroadcastReceiver() {
             when (intent.action) {
                 ACTION_FIRE -> {
                     val task = container.database.taskDao().get(taskId)?.toDomain()
-                    if (task != null) Notifications.show(context, task, day)
+                    if (task != null) Notifications.show(context, task, day, container.settings.language.first())
                     container.reminders.schedule(taskId)
                 }
                 ACTION_DONE -> {

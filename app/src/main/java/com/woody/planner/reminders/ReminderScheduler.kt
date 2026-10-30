@@ -4,21 +4,29 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import com.woody.planner.MainActivity
+import com.woody.planner.data.SettingsRepository
 import com.woody.planner.data.TaskDao
 import com.woody.planner.data.toDomain
 import com.woody.planner.domain.ReminderMath
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
+import kotlinx.coroutines.flow.first
 
 /**
  * Планирует напоминания через AlarmManager: для каждой задачи — ровно один будильник
  * на ближайшее срабатывание. Никаких сервисов и периодической работы в фоне:
  * система будит приложение только в момент напоминания.
+ *
+ * По умолчанию будильник ставится как «будильник-часы» ([AlarmManager.setAlarmClock]): такие срабатывания
+ * система не откладывает в режиме сна, а прошивки с агрессивной экономией (Xiaomi, Huawei, Oppo…)
+ * не отменяют их у закрытых приложений. Расход заряда тот же — одно пробуждение на напоминание.
  */
 class ReminderScheduler(
     private val context: Context,
     private val taskDao: () -> TaskDao,
+    private val settings: () -> SettingsRepository,
 ) {
     private val alarmManager = context.getSystemService(AlarmManager::class.java)
 
@@ -47,24 +55,19 @@ class ReminderScheduler(
         taskDao().withReminders().forEach { schedule(it.id) }
     }
 
-    fun snooze(taskId: Long, occurrence: LocalDate, minutes: Long) {
+    suspend fun snooze(taskId: Long, occurrence: LocalDate, minutes: Long) {
         setAlarm(taskId, occurrence, System.currentTimeMillis() + minutes * 60_000L)
     }
 
     /** Пробное напоминание через [delayMs] — проверяет всю цепочку: будильник, приёмник, канал, звук. */
-    fun scheduleTest(delayMs: Long) {
+    suspend fun scheduleTest(delayMs: Long) {
         val pending = PendingIntent.getBroadcast(
             context,
             TEST_REQUEST_CODE,
             Intent(context, ReminderReceiver::class.java).setAction(ReminderReceiver.ACTION_TEST),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val at = System.currentTimeMillis() + delayMs
-        if (alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-        } else {
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-        }
+        set(System.currentTimeMillis() + delayMs, pending, openDay = null)
     }
 
     fun cancel(taskId: Long) {
@@ -74,16 +77,37 @@ class ReminderScheduler(
     private companion object {
         /** Код запроса пробного будильника — вне диапазона id задач. */
         const val TEST_REQUEST_CODE = Int.MAX_VALUE - 7
+
+        /** Код запроса окна «показать будильник» — тоже вне диапазона id задач. */
+        const val SHOW_REQUEST_CODE = Int.MAX_VALUE - 8
     }
 
-    private fun setAlarm(taskId: Long, occurrence: LocalDate, atMillis: Long) {
-        val pending = firePendingIntent(taskId, occurrence)
-        if (alarmManager.canScheduleExactAlarms()) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
-        } else {
+    private suspend fun setAlarm(taskId: Long, occurrence: LocalDate, atMillis: Long) {
+        set(atMillis, firePendingIntent(taskId, occurrence), occurrence)
+    }
+
+    private suspend fun set(atMillis: Long, pending: PendingIntent, openDay: LocalDate?) {
+        when {
             // Без разрешения на точные будильники система может сдвинуть срабатывание на несколько минут.
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
+            !alarmManager.canScheduleExactAlarms() ->
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
+            settings().alarmClockReminders.first() ->
+                alarmManager.setAlarmClock(AlarmManager.AlarmClockInfo(atMillis, showIntent(openDay)), pending)
+            else ->
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, atMillis, pending)
         }
+    }
+
+    /** Нажатие на будильник в шторке открывает день напоминания. */
+    private fun showIntent(day: LocalDate?): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        day?.let { intent.putExtra(Notifications.EXTRA_OPEN_DAY, it.toEpochDay()) }
+        return PendingIntent.getActivity(
+            context,
+            SHOW_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     private fun firePendingIntent(taskId: Long, occurrence: LocalDate?): PendingIntent {

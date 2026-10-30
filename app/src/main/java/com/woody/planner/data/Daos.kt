@@ -25,6 +25,9 @@ interface CategoryDao {
 
     @Query("DELETE FROM categories WHERE id = :id")
     suspend fun delete(id: Long)
+
+    @Query("UPDATE categories SET name = :to WHERE name = :from")
+    suspend fun rename(from: String, to: String)
 }
 
 data class CategoryCount(val categoryId: Long, val count: Int)

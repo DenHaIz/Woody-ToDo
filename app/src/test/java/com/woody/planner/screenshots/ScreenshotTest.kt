@@ -26,6 +26,10 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.woody.planner.WoodyApp
+import com.woody.planner.data.AppLanguage
+import com.woody.planner.ui.i18n.LocalLanguage
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.test.performScrollTo
 import com.woody.planner.data.DraftSubtask
 import com.woody.planner.data.SwipeStyle
 import com.woody.planner.data.TaskDraft
@@ -98,10 +102,12 @@ class ScreenshotTest {
         repo.save(TaskDraft(title = "Разобрать почту", categoryId = 4, date = today))
     }
 
-    private fun render(dark: Boolean, openDay: LocalDate? = null) {
+    private fun render(dark: Boolean, openDay: LocalDate? = null, lang: AppLanguage = AppLanguage.Russian) {
         compose.setContent {
-            WoodyTheme(darkTheme = dark) {
-                WoodyAppShell(container, openDayRequest = openDay, onOpenDayHandled = {})
+            CompositionLocalProvider(LocalLanguage provides lang) {
+                WoodyTheme(darkTheme = dark) {
+                    WoodyAppShell(container, openDayRequest = openDay, onOpenDayHandled = {})
+                }
             }
         }
         // Статус-бар 40dp и жестовая панель 16dp, как на современном телефоне.
@@ -160,6 +166,49 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
         compose.waitForIdle()
         shot("settings_light")
+    }
+
+    /** Карточка напоминаний и переключатель языка — ниже первого экрана настроек. */
+    @Test
+    fun settingsReminders() {
+        seed()
+        render(dark = false)
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        compose.onNodeWithText("Капля").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Проверить напоминание").performScrollTo()
+        compose.waitForIdle()
+        shot("settings_reminders")
+        compose.onNodeWithText("Проверить напоминание").performClick()
+        compose.waitForIdle()
+        shot("settings_reminders_test")
+    }
+
+    @Test
+    fun english() {
+        seed()
+        render(dark = false, lang = AppLanguage.English)
+        shot("en_day")
+        compose.onNodeWithContentDescription("Add").performClick()
+        compose.waitForIdle()
+        shot("en_editor")
+        compose.onNodeWithText("Reminder").performClick()
+        compose.waitForIdle()
+        shot("en_popup_reminder")
+    }
+
+    @Test
+    fun englishSettings() {
+        seed()
+        render(dark = true, lang = AppLanguage.English)
+        compose.onNodeWithContentDescription("Add").performTouchInput { longClick() }
+        compose.waitForIdle()
+        shot("en_settings")
+        compose.onNodeWithText("Drop").performClick()
+        compose.onNodeWithText("Test a reminder").performScrollTo()
+        compose.waitForIdle()
+        shot("en_settings_reminders")
     }
 
     @Test

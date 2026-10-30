@@ -7,14 +7,26 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.Locale
 
 enum class ThemeMode { System, Light, Dark }
 
+/** Язык интерфейса и уведомлений. */
+enum class AppLanguage(val title: String, val locale: Locale) {
+    Russian("Русский", Locale.forLanguageTag("ru")),
+    English("English", Locale.ENGLISH);
+
+    fun pick(ru: String, en: String): String = if (this == English) en else ru
+}
+
 /** Анимация свайпа карточки задачи. */
-enum class SwipeStyle(val title: String, val description: String) {
-    Classic("Классика", "Подложка проявляется под карточкой"),
-    Liquid("Капля", "Из края вытягивается капля воды и лопается"),
-    Book("Книжка", "Карточка перелистывается, как страница"),
+enum class SwipeStyle(private val titleRu: String, private val titleEn: String, private val descriptionRu: String, private val descriptionEn: String) {
+    Classic("Классика", "Classic", "Подложка проявляется под карточкой", "The action shows up under the card"),
+    Liquid("Капля", "Drop", "Из края тянется капля воды и лопается", "A water drop stretches out and pops"),
+    Book("Книжка", "Book", "Карточка перелистывается, как страница", "The card turns like a page");
+
+    fun title(lang: AppLanguage) = lang.pick(titleRu, titleEn)
+    fun description(lang: AppLanguage) = lang.pick(descriptionRu, descriptionEn)
 }
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
@@ -24,6 +36,8 @@ class SettingsRepository(private val context: Context) {
     private val swipeKey = stringPreferencesKey("swipe_style")
     private val menuHintKey = booleanPreferencesKey("menu_hint_seen")
     private val recentCategoriesKey = stringPreferencesKey("recent_categories")
+    private val languageKey = stringPreferencesKey("language")
+    private val alarmClockKey = booleanPreferencesKey("alarm_clock_reminders")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
         prefs[themeKey]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System
@@ -32,6 +46,16 @@ class SettingsRepository(private val context: Context) {
     val swipeStyle: Flow<SwipeStyle> = context.dataStore.data.map { prefs ->
         prefs[swipeKey]?.let { runCatching { SwipeStyle.valueOf(it) }.getOrNull() } ?: SwipeStyle.Classic
     }
+
+    val language: Flow<AppLanguage> = context.dataStore.data.map { prefs ->
+        prefs[languageKey]?.let { runCatching { AppLanguage.valueOf(it) }.getOrNull() } ?: AppLanguage.Russian
+    }
+
+    /**
+     * Напоминания как системный будильник ([android.app.AlarmManager.setAlarmClock]): их не откладывает
+     * режим сна и не отменяют «оптимизаторы» прошивок, но в строке состояния виден значок будильника.
+     */
+    val alarmClockReminders: Flow<Boolean> = context.dataStore.data.map { it[alarmClockKey] ?: true }
 
     /** Пользователь уже открывал меню кнопки «+» — подсказку больше не показываем. */
     val menuHintSeen: Flow<Boolean> = context.dataStore.data.map { it[menuHintKey] ?: false }
@@ -54,6 +78,14 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSwipeStyle(style: SwipeStyle) {
         context.dataStore.edit { it[swipeKey] = style.name }
+    }
+
+    suspend fun setLanguage(language: AppLanguage) {
+        context.dataStore.edit { it[languageKey] = language.name }
+    }
+
+    suspend fun setAlarmClockReminders(enabled: Boolean) {
+        context.dataStore.edit { it[alarmClockKey] = enabled }
     }
 
     suspend fun setMenuHintSeen() {

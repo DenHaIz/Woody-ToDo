@@ -59,12 +59,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.woody.planner.R
+import com.woody.planner.data.AppLanguage
+import com.woody.planner.ui.i18n.LocalLanguage
+import com.woody.planner.ui.i18n.appLocale
+import com.woody.planner.ui.i18n.dayMonth
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.domain.DayAgenda
 import com.woody.planner.domain.TaskItem
 import com.woody.planner.ui.components.FitText
 import com.woody.planner.ui.components.MonthCalendar
 import com.woody.planner.ui.components.ProgressRing
-import com.woody.planner.ui.components.RuLocale
 import com.woody.planner.ui.components.SwipeAction
 import com.woody.planner.ui.components.SwipeableTaskCard
 import com.woody.planner.ui.components.WeekStrip
@@ -85,7 +89,6 @@ import java.time.temporal.ChronoUnit
 
 private const val DAY_PAGES = 20_000
 private const val DAY_START_PAGE = DAY_PAGES / 2
-private val DayMonthFormat = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
 
 @Composable
 fun DayScreen(
@@ -193,10 +196,10 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                     label = "title",
                 ) { day ->
                     Column {
-                        FitText(dayTitle(day, today), style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
+                        FitText(dayTitle(day, today, LocalLanguage.current), style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                daySubtitle(day, today),
+                                daySubtitle(day, today, LocalLanguage.current),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary,
                                 maxLines = 1,
@@ -205,7 +208,7 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                             )
                             Icon(
                                 WoodyIcons.ChevronDown,
-                                contentDescription = if (expanded) "Свернуть календарь" else "Открыть календарь",
+                                contentDescription = if (expanded) tr("Свернуть календарь", "Collapse calendar") else tr("Открыть календарь", "Open calendar"),
                                 tint = colors.textSecondary,
                                 modifier = Modifier
                                     .padding(start = 2.dp)
@@ -218,7 +221,7 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                                 exit = scaleOut(Motion.snappy()) + fadeOut(),
                             ) {
                                 Text(
-                                    "Сегодня",
+                                    tr("Сегодня", "Today"),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = colors.accent,
                                     maxLines = 1,
@@ -294,6 +297,7 @@ private fun DayPage(
     val warning = WoodyTheme.colors.warning
     // Мало задач — карточки крупнее, места на экране хватает.
     val large = current.total + current.overdue.size <= 3
+    val lang = LocalLanguage.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -303,9 +307,9 @@ private fun DayPage(
         if (current.isEmpty) {
             item(key = "empty") { EmptyDay(Modifier.animateItem()) }
         }
-        taskSection("overdue", "Просрочено", current.overdue, vm, onEditTask, large, warning)
-        taskSection("timed", "По расписанию", current.timed, vm, onEditTask, large)
-        taskSection("untimed", if (current.timed.isEmpty()) "Задачи" else "В течение дня", current.untimed, vm, onEditTask, large)
+        taskSection("overdue", lang.pick("Просрочено", "Overdue"), current.overdue, vm, onEditTask, large, warning)
+        taskSection("timed", lang.pick("По расписанию", "Scheduled"), current.timed, vm, onEditTask, large)
+        taskSection("untimed", if (current.timed.isEmpty()) lang.pick("Задачи", "Tasks") else lang.pick("В течение дня", "Anytime today"), current.untimed, vm, onEditTask, large)
         if (current.done.isNotEmpty()) {
             item(key = "header-done") {
                 DoneHeader(current, doneExpanded, { doneExpanded = !doneExpanded }, Modifier.animateItem())
@@ -342,16 +346,16 @@ private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onE
             ),
             startAction = SwipeAction(
                 icon = if (item.done) WoodyIcons.Undo else WoodyIcons.Check,
-                label = if (item.done) "Вернуть" else "Готово",
+                label = if (item.done) tr("Вернуть", "Undo") else tr("Готово", "Done"),
                 color = colors.success,
                 dismiss = false,
                 onTrigger = { vm.toggleDone(item) },
             ),
             endAction = when {
-                item.done -> SwipeAction(WoodyIcons.Trash, "Удалить", colors.accent, dismiss = true) { vm.delete(item.taskId) }
-                item.isRecurring -> SwipeAction(WoodyIcons.Skip, "Пропустить", colors.warning, dismiss = true) { vm.postpone(item) }
-                item.overdue -> SwipeAction(WoodyIcons.ArrowRight, "На сегодня", colors.warning, dismiss = true) { vm.postpone(item) }
-                else -> SwipeAction(WoodyIcons.ArrowRight, "На завтра", colors.warning, dismiss = true) { vm.postpone(item) }
+                item.done -> SwipeAction(WoodyIcons.Trash, tr("Удалить", "Delete"), colors.accent, dismiss = true) { vm.delete(item.taskId) }
+                item.isRecurring -> SwipeAction(WoodyIcons.Skip, tr("Пропустить", "Skip"), colors.warning, dismiss = true) { vm.postpone(item) }
+                item.overdue -> SwipeAction(WoodyIcons.ArrowRight, tr("На сегодня", "To today"), colors.warning, dismiss = true) { vm.postpone(item) }
+                else -> SwipeAction(WoodyIcons.ArrowRight, tr("На завтра", "Tomorrow"), colors.warning, dismiss = true) { vm.postpone(item) }
             },
         ) {
             TaskCard(
@@ -368,7 +372,7 @@ private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onE
 @Composable
 private fun SectionHeader(title: String, modifier: Modifier, accent: androidx.compose.ui.graphics.Color? = null) {
     Text(
-        title.uppercase(RuLocale),
+        title.uppercase(appLocale),
         style = MaterialTheme.typography.labelSmall,
         color = accent ?: WoodyTheme.colors.textSecondary,
         modifier = modifier.padding(start = 8.dp, top = 8.dp),
@@ -387,7 +391,7 @@ private fun DoneHeader(agenda: DayAgenda, expanded: Boolean, onToggle: () -> Uni
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "ВЫПОЛНЕНО · ${agenda.doneCount}",
+            tr("ВЫПОЛНЕНО", "DONE") + " · ${agenda.doneCount}",
             style = MaterialTheme.typography.labelSmall,
             color = colors.success,
         )
@@ -422,10 +426,10 @@ private fun EmptyDay(modifier: Modifier) {
     ) {
         Image(painterResource(R.drawable.woody_mark), contentDescription = null, modifier = Modifier.size(112.dp))
         Spacer(Modifier.height(16.dp))
-        Text("Свободный день", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
+        Text(tr("Свободный день", "A free day"), style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Нажмите +, чтобы добавить задачу",
+            tr("Нажмите +, чтобы добавить задачу", "Tap + to add a task"),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,
@@ -434,15 +438,16 @@ private fun EmptyDay(modifier: Modifier) {
     }
 }
 
-private fun dayTitle(day: LocalDate, today: LocalDate): String = when (ChronoUnit.DAYS.between(today, day)) {
-    0L -> "Сегодня"
-    1L -> "Завтра"
-    -1L -> "Вчера"
-    else -> day.dayOfWeek.getDisplayName(TextStyle.FULL, RuLocale).replaceFirstChar { it.titlecase(RuLocale) }
+private fun dayTitle(day: LocalDate, today: LocalDate, lang: AppLanguage): String = when (ChronoUnit.DAYS.between(today, day)) {
+    0L -> lang.pick("Сегодня", "Today")
+    1L -> lang.pick("Завтра", "Tomorrow")
+    -1L -> lang.pick("Вчера", "Yesterday")
+    else -> day.dayOfWeek.getDisplayName(TextStyle.FULL, lang.locale).replaceFirstChar { it.titlecase(lang.locale) }
 }
 
-private fun daySubtitle(day: LocalDate, today: LocalDate): String {
-    val date = day.format(DayMonthFormat) + if (day.year != today.year) " ${day.year}" else ""
+private fun daySubtitle(day: LocalDate, today: LocalDate, lang: AppLanguage): String {
+    val date = lang.dayMonth(day) + if (day.year != today.year) lang.pick(" ${day.year}", ", ${day.year}") else ""
     val delta = ChronoUnit.DAYS.between(today, day)
-    return if (delta in -1L..1L) "$date, ${day.dayOfWeek.getDisplayName(TextStyle.FULL, RuLocale)}" else date
+    val weekday = day.dayOfWeek.getDisplayName(TextStyle.FULL, lang.locale)
+    return if (delta in -1L..1L) "$date, $weekday" else date
 }

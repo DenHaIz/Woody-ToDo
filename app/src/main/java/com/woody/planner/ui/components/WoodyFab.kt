@@ -25,6 +25,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.woody.planner.ui.glass.liquidGlass
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
 import com.woody.planner.ui.theme.WoodyIcons
@@ -44,6 +45,7 @@ fun WoodyFab(
 ) {
     val colors = WoodyTheme.colors
     val haptics = LocalHapticFeedback.current
+    val addLabel = tr("Добавить", "Add")
     Row(modifier.padding(end = 20.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         AnimatedVisibility(
             visible = showHint,
@@ -51,7 +53,7 @@ fun WoodyFab(
             exit = fadeOut() + slideOutHorizontally(Motion.soft()) { it / 3 },
         ) {
             Text(
-                "Удерживайте + — настройки",
+                tr("Удерживайте + — настройки", "Hold + for settings"),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textPrimary,
                 maxLines = 1,
@@ -65,7 +67,7 @@ fun WoodyFab(
             Modifier
                 .size(66.dp)
                 .onGloballyPositioned { onButtonBounds(it.boundsInRoot()) }
-                .semantics { contentDescription = "Добавить" }
+                .semantics { contentDescription = addLabel }
                 .bouncyClickable(
                     pressedScale = 0.9f,
                     glowColor = Color.White,

@@ -92,7 +92,12 @@ import com.woody.planner.domain.bit
 import com.woody.planner.ui.components.FitText
 import com.woody.planner.ui.components.GlassSheet
 import com.woody.planner.ui.components.MonthCalendar
-import com.woody.planner.ui.components.RuLocale
+import com.woody.planner.data.AppLanguage
+import com.woody.planner.ui.i18n.LocalLanguage
+import com.woody.planner.ui.i18n.appLocale
+import com.woody.planner.ui.i18n.dayMonth
+import com.woody.planner.ui.i18n.plural
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.ui.components.WoodyChip
 import com.woody.planner.ui.components.bouncyClickable
 import com.woody.planner.ui.theme.Motion
@@ -108,21 +113,28 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle as JTextStyle
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
-private val DateFormat = DateTimeFormatter.ofPattern("d MMMM", RuLocale)
+/** За сколько минут до задачи напомнить. */
+private val ReminderOptions = listOf(0, 10, 30, 60)
 
-private val ReminderOptions = listOf(0 to "В момент", 10 to "За 10 мин", 30 to "За 30 мин", 60 to "За час")
+private fun reminderLabel(minutes: Int, lang: AppLanguage): String = when (minutes) {
+    0 -> lang.pick("В момент", "On time")
+    60 -> lang.pick("За час", "1 h before")
+    else -> lang.pick("За $minutes мин", "$minutes min before")
+}
 private val TimePresets = listOf(LocalTime.of(9, 0), LocalTime.of(13, 0), LocalTime.of(18, 0), LocalTime.of(21, 0))
 
 private val TileShape = RoundedCornerShape(24.dp)
 
 /** Параметр задачи, который настраивается во всплывающем окне. */
-private enum class Param(val title: String) {
-    Date("Дата"),
-    Time("Время"),
-    Category("Категория"),
-    Reminder("Напоминание"),
-    Repeat("Повтор"),
-    Checklist("Чек-лист"),
+private enum class Param(private val ru: String, private val en: String) {
+    Date("Дата", "Date"),
+    Time("Время", "Time"),
+    Category("Категория", "Category"),
+    Reminder("Напоминание", "Reminder"),
+    Repeat("Повтор", "Repeat"),
+    Checklist("Чек-лист", "Checklist");
+
+    fun title(lang: AppLanguage) = lang.pick(ru, en)
 }
 
 /**
@@ -237,7 +249,7 @@ private fun EditorContent(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (isNew) "Новая задача" else "Задача",
+                if (isNew) tr("Новая задача", "New task") else tr("Задача", "Task"),
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.textSecondary,
                 modifier = Modifier.weight(1f),
@@ -248,7 +260,7 @@ private fun EditorContent(
         PlainField(
             value = draft.title,
             onValueChange = { onChange(draft.copy(title = it)) },
-            placeholder = "Что нужно сделать?",
+            placeholder = tr("Что нужно сделать?", "What needs doing?"),
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier
                 .fillMaxWidth()
@@ -260,7 +272,7 @@ private fun EditorContent(
         PlainField(
             value = draft.note,
             onValueChange = { onChange(draft.copy(note = it)) },
-            placeholder = "Заметка",
+            placeholder = tr("Заметка", "Note"),
             style = MaterialTheme.typography.bodyLarge.copy(color = colors.textSecondary),
             modifier = Modifier
                 .fillMaxWidth()
@@ -270,18 +282,20 @@ private fun EditorContent(
         )
 
         val category = categories.firstOrNull { it.id == draft.categoryId }
+        val lang = LocalLanguage.current
+        val none = tr("Нет", "None")
         val tiles = listOf(
-            TileData(Param.Date, WoodyIcons.Calendar, dateLabel(draft.date, today), active = draft.date != today),
+            TileData(Param.Date, WoodyIcons.Calendar, dateLabel(draft.date, today, lang), active = draft.date != today),
             TileData(
                 Param.Time,
                 WoodyIcons.Clock,
-                draft.time?.format(TimeFormat) ?: "Весь день",
+                draft.time?.format(TimeFormat) ?: tr("Весь день", "All day"),
                 active = draft.time != null,
             ),
             TileData(
                 Param.Category,
                 WoodyIcons.Grid,
-                category?.name ?: "Нет",
+                category?.name ?: none,
                 active = category != null,
                 tint = category?.let { Color(it.colorArgb) },
                 emoji = category?.emoji,
@@ -289,14 +303,14 @@ private fun EditorContent(
             TileData(
                 Param.Reminder,
                 WoodyIcons.Bell,
-                ReminderOptions.firstOrNull { it.first == draft.reminderOffsetMin }?.second ?: "Нет",
+                draft.reminderOffsetMin?.let { reminderLabel(it, lang) } ?: none,
                 active = draft.reminderOffsetMin != null,
             ),
-            TileData(Param.Repeat, WoodyIcons.Repeat, recurrenceLabel(draft.recurrence), active = draft.recurrence.isRecurring),
+            TileData(Param.Repeat, WoodyIcons.Repeat, recurrenceLabel(draft.recurrence, lang), active = draft.recurrence.isRecurring),
             TileData(
                 Param.Checklist,
                 WoodyIcons.Checklist,
-                draft.subtasks.count { it.title.isNotBlank() }.let { if (it == 0) "Пусто" else pointsWord(it) },
+                draft.subtasks.count { it.title.isNotBlank() }.let { if (it == 0) lang.pick("Пусто", "Empty") else pointsWord(it, lang) },
                 active = draft.subtasks.any { it.title.isNotBlank() },
             ),
         )
@@ -330,7 +344,7 @@ private fun EditorContent(
                         .background(colors.accent.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(WoodyIcons.Trash, contentDescription = "Удалить", tint = colors.accent)
+                    Icon(WoodyIcons.Trash, contentDescription = tr("Удалить", "Delete"), tint = colors.accent)
                 }
             }
             val enabled = draft.title.isNotBlank()
@@ -352,7 +366,7 @@ private fun EditorContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    if (isNew) "Добавить" else "Сохранить",
+                    if (isNew) tr("Добавить", "Add") else tr("Сохранить", "Save"),
                     style = MaterialTheme.typography.labelLarge,
                     color = Color.White,
                 )
@@ -399,6 +413,7 @@ private fun TileRow(tiles: List<TileData>, height: Dp, compact: Boolean, onOpen:
 @Composable
 private fun ParamTile(tile: TileData, compact: Boolean, onClick: (Offset) -> Unit, modifier: Modifier = Modifier) {
     val colors = WoodyTheme.colors
+    val title = tile.param.title(LocalLanguage.current)
     val tint = tile.tint ?: colors.accent
     var center by remember { mutableStateOf(Offset.Unspecified) }
     val background by animateColorAsState(
@@ -410,7 +425,7 @@ private fun ParamTile(tile: TileData, compact: Boolean, onClick: (Offset) -> Uni
     val iconSize by animateDpAsState(if (compact) 28.dp else 42.dp, TileSpring, label = "tileIcon")
     Column(
         modifier
-            .semantics(mergeDescendants = true) { contentDescription = tile.param.title }
+            .semantics(mergeDescendants = true) { contentDescription = title }
             .onGloballyPositioned { center = it.boundsInRoot().center }
             .bouncyClickable(glowColor = tint, glowShape = TileShape) { onClick(center) }
             .clip(TileShape)
@@ -436,7 +451,7 @@ private fun ParamTile(tile: TileData, compact: Boolean, onClick: (Offset) -> Uni
             }
         }
         Column {
-            FitText(tile.param.title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, minSize = 9.sp)
+            FitText(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, minSize = 9.sp)
             FitText(
                 tile.value,
                 style = (if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleLarge)
@@ -465,7 +480,7 @@ private fun MoreStrip(hidden: List<TileData>, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            "Дополнительно",
+            tr("Дополнительно", "More"),
             style = MaterialTheme.typography.labelLarge,
             color = colors.textSecondary,
             maxLines = 1,
@@ -553,7 +568,7 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
                     Text(
-                        shownParam.title,
+                        shownParam.title(LocalLanguage.current),
                         style = MaterialTheme.typography.titleLarge,
                         color = colors.textPrimary,
                         modifier = Modifier.weight(1f),
@@ -571,7 +586,7 @@ private fun CloseButton(onClick: () -> Unit) {
     val colors = WoodyTheme.colors
     Icon(
         WoodyIcons.Close,
-        contentDescription = "Закрыть",
+        contentDescription = tr("Закрыть", "Close"),
         tint = colors.textSecondary,
         modifier = Modifier
             .size(36.dp)
@@ -595,7 +610,7 @@ private fun DoneButton(onClick: () -> Unit) {
             .background(colors.accent),
         contentAlignment = Alignment.Center,
     ) {
-        Text("Готово", style = MaterialTheme.typography.labelLarge, color = Color.White)
+        Text(tr("Готово", "Done"), style = MaterialTheme.typography.labelLarge, color = Color.White)
     }
 }
 
@@ -609,9 +624,9 @@ private fun DatePanel(draft: TaskDraft, today: LocalDate, onChange: (TaskDraft) 
         onClose()
     }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        WoodyChip("Сегодня", draft.date == today, { pick(today) })
-        WoodyChip("Завтра", draft.date == today.plusDays(1), { pick(today.plusDays(1)) })
-        WoodyChip("Через неделю", draft.date == today.plusWeeks(1), { pick(today.plusWeeks(1)) })
+        WoodyChip(tr("Сегодня", "Today"), draft.date == today, { pick(today) })
+        WoodyChip(tr("Завтра", "Tomorrow"), draft.date == today.plusDays(1), { pick(today.plusDays(1)) })
+        WoodyChip(tr("Через неделю", "In a week"), draft.date == today.plusWeeks(1), { pick(today.plusWeeks(1)) })
     }
     Spacer(Modifier.height(12.dp))
     MonthCalendar(
@@ -630,7 +645,7 @@ private fun TimePanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: 
     val initial = draft.time ?: LocalTime.now().plusHours(1).withMinute(0)
     val state = rememberTimePickerState(initial.hour, initial.minute, is24Hour = true)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        WoodyChip("Весь день", draft.time == null, {
+        WoodyChip(tr("Весь день", "All day"), draft.time == null, {
             onChange(draft.copy(time = null))
             onClose()
         })
@@ -668,7 +683,7 @@ private fun CategoryPanel(draft: TaskDraft, categories: List<Category>, onChange
     val colors = WoodyTheme.colors
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         WoodyChip(
-            label = "Без категории",
+            label = tr("Без категории", "No category"),
             selected = draft.categoryId == null,
             onClick = {
                 onChange(draft.copy(categoryId = null))
@@ -701,13 +716,13 @@ private fun ReminderPanel(
 ) {
     val colors = WoodyTheme.colors
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        WoodyChip("Нет", draft.reminderOffsetMin == null, {
+        WoodyChip(tr("Нет", "None"), draft.reminderOffsetMin == null, {
             onChange(draft.copy(reminderOffsetMin = null))
             onClose()
         })
-        ReminderOptions.forEach { (minutes, label) ->
+        ReminderOptions.forEach { minutes ->
             WoodyChip(
-                label = label,
+                label = reminderLabel(minutes, LocalLanguage.current),
                 selected = draft.reminderOffsetMin == minutes,
                 icon = WoodyIcons.Bell,
                 onClick = {
@@ -726,16 +741,22 @@ private fun ReminderPanel(
             !draft.recurrence.isRecurring
         Text(
             if (missed) {
-                "У задачи нет времени, а сегодня ${ReminderMath.DefaultTime.format(TimeFormat)} уже прошло — укажите время, иначе напоминания не будет."
+                tr(
+                    "У задачи нет времени, а сегодня ${ReminderMath.DefaultTime.format(TimeFormat)} уже прошло — укажите время, иначе напоминания не будет.",
+                    "The task has no time and ${ReminderMath.DefaultTime.format(TimeFormat)} has already passed today — set a time, or there will be no reminder.",
+                )
             } else {
-                "У задачи нет времени — напомню в ${ReminderMath.DefaultTime.format(TimeFormat)}."
+                tr(
+                    "У задачи нет времени — напомню в ${ReminderMath.DefaultTime.format(TimeFormat)}.",
+                    "The task has no time — I'll remind you at ${ReminderMath.DefaultTime.format(TimeFormat)}.",
+                )
             },
             style = MaterialTheme.typography.bodyMedium,
             color = if (missed) colors.accent else colors.textSecondary,
             modifier = Modifier.padding(top = 14.dp, start = 4.dp),
         )
         Text(
-            "Указать время",
+            tr("Указать время", "Set a time"),
             style = MaterialTheme.typography.labelLarge,
             color = colors.accent,
             modifier = Modifier
@@ -769,11 +790,11 @@ private fun ChecklistPanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onCl
 private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: (Recurrence) -> Unit) {
     val colors = WoodyTheme.colors
     val options = listOf(
-        RecurrenceType.NONE to "Нет",
-        RecurrenceType.DAILY to "Каждый день",
-        RecurrenceType.WEEKLY to "По дням недели",
-        RecurrenceType.EVERY_N_DAYS to "Каждые N дней",
-        RecurrenceType.MONTHLY to "Каждый месяц",
+        RecurrenceType.NONE to tr("Нет", "None"),
+        RecurrenceType.DAILY to tr("Каждый день", "Every day"),
+        RecurrenceType.WEEKLY to tr("По дням недели", "On weekdays"),
+        RecurrenceType.EVERY_N_DAYS to tr("Каждые N дней", "Every N days"),
+        RecurrenceType.MONTHLY to tr("Каждый месяц", "Every month"),
     )
     Column(Modifier.animateContentSize(Motion.soft())) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -824,7 +845,7 @@ private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: 
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            day.getDisplayName(JTextStyle.SHORT, RuLocale),
+                            day.getDisplayName(JTextStyle.SHORT, appLocale),
                             style = MaterialTheme.typography.labelMedium,
                             color = if (on) Color.White else colors.textPrimary,
                         )
@@ -840,7 +861,7 @@ private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: 
             ) {
                 StepperButton("−") { onChange(value.copy(interval = (value.interval - 1).coerceAtLeast(2))) }
                 Text(
-                    "каждые ${value.interval} ${daysWord(value.interval)}",
+                    LocalLanguage.current.let { it.pick("каждые", "every") + " ${value.interval} " + daysWord(value.interval, it) },
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
                 )
@@ -880,13 +901,13 @@ private fun SubtaskEditor(subtasks: List<DraftSubtask>, onChange: (List<DraftSub
                 PlainField(
                     value = sub.title,
                     onValueChange = { text -> onChange(subtasks.map { if (it.key == sub.key) it.copy(title = text) else it }) },
-                    placeholder = "Пункт",
+                    placeholder = tr("Пункт", "Item"),
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f),
                 )
                 Icon(
                     WoodyIcons.Close,
-                    contentDescription = "Убрать пункт",
+                    contentDescription = tr("Убрать пункт", "Remove item"),
                     tint = colors.textTertiary,
                     modifier = Modifier
                         .size(32.dp)
@@ -914,7 +935,7 @@ private fun SubtaskEditor(subtasks: List<DraftSubtask>, onChange: (List<DraftSub
             PlainField(
                 value = pending,
                 onValueChange = { pending = it },
-                placeholder = "Добавить пункт",
+                placeholder = tr("Добавить пункт", "Add item"),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f),
                 imeAction = ImeAction.Done,
@@ -922,7 +943,7 @@ private fun SubtaskEditor(subtasks: List<DraftSubtask>, onChange: (List<DraftSub
             )
             AnimatedVisibility(pending.isNotBlank(), enter = fadeIn(), exit = fadeOut()) {
                 Text(
-                    "Добавить",
+                    tr("Добавить", "Add"),
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.accent,
                     modifier = Modifier
@@ -967,48 +988,29 @@ private fun PlainField(
     )
 }
 
-private fun dateLabel(date: LocalDate, today: LocalDate): String = when (date) {
-    today -> "Сегодня"
-    today.plusDays(1) -> "Завтра"
-    today.minusDays(1) -> "Вчера"
-    else -> date.format(DateFormat)
+private fun dateLabel(date: LocalDate, today: LocalDate, lang: AppLanguage): String = when (date) {
+    today -> lang.pick("Сегодня", "Today")
+    today.plusDays(1) -> lang.pick("Завтра", "Tomorrow")
+    today.minusDays(1) -> lang.pick("Вчера", "Yesterday")
+    else -> lang.dayMonth(date)
 }
 
-private fun recurrenceLabel(r: Recurrence): String = when (r.type) {
-    RecurrenceType.NONE -> "Нет"
-    RecurrenceType.DAILY -> "Каждый день"
+private fun recurrenceLabel(r: Recurrence, lang: AppLanguage): String = when (r.type) {
+    RecurrenceType.NONE -> lang.pick("Нет", "None")
+    RecurrenceType.DAILY -> lang.pick("Каждый день", "Every day")
     RecurrenceType.WEEKLY -> {
         val days = DayOfWeek.entries.filter { r.daysMask and it.bit != 0 }
         when {
-            days.size == 7 -> "Каждый день"
-            days == DayOfWeek.entries.take(5) -> "По будням"
-            days == DayOfWeek.entries.takeLast(2) -> "По выходным"
-            else -> days.joinToString(", ") { it.getDisplayName(JTextStyle.SHORT, RuLocale) }
+            days.size == 7 -> lang.pick("Каждый день", "Every day")
+            days == DayOfWeek.entries.take(5) -> lang.pick("По будням", "Weekdays")
+            days == DayOfWeek.entries.takeLast(2) -> lang.pick("По выходным", "Weekends")
+            else -> days.joinToString(", ") { it.getDisplayName(JTextStyle.SHORT, lang.locale) }
         }
     }
-    RecurrenceType.EVERY_N_DAYS -> "Раз в ${r.interval} ${daysWord(r.interval)}"
-    RecurrenceType.MONTHLY -> "Каждый месяц"
+    RecurrenceType.EVERY_N_DAYS -> lang.pick("Раз в", "Every") + " ${r.interval} " + daysWord(r.interval, lang)
+    RecurrenceType.MONTHLY -> lang.pick("Каждый месяц", "Every month")
 }
 
-private fun pointsWord(n: Int): String {
-    val mod100 = n % 100
-    val mod10 = n % 10
-    val word = when {
-        mod100 in 11..14 -> "пунктов"
-        mod10 == 1 -> "пункт"
-        mod10 in 2..4 -> "пункта"
-        else -> "пунктов"
-    }
-    return "$n $word"
-}
+private fun pointsWord(n: Int, lang: AppLanguage): String = "$n " + lang.plural(n, "пункт", "пункта", "пунктов", "item", "items")
 
-private fun daysWord(n: Int): String {
-    val mod100 = n % 100
-    val mod10 = n % 10
-    return when {
-        mod100 in 11..14 -> "дней"
-        mod10 == 1 -> "день"
-        mod10 in 2..4 -> "дня"
-        else -> "дней"
-    }
-}
+private fun daysWord(n: Int, lang: AppLanguage): String = lang.plural(n, "день", "дня", "дней", "day", "days")

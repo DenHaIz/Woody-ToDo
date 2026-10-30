@@ -3,6 +3,7 @@ package com.woody.planner.ui.day
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.woody.planner.AppContainer
+import com.woody.planner.data.AppLanguage
 import com.woody.planner.domain.DayAgenda
 import com.woody.planner.domain.DaySummary
 import com.woody.planner.domain.SubtaskItem
@@ -21,7 +22,8 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 /** Событие для плашки «Отменить». */
-data class UndoEvent(val id: Long, val message: String, val undo: suspend () -> Unit)
+/** Отмена последнего действия; текст собирается на языке интерфейса в момент показа. */
+data class UndoEvent(val id: Long, val message: (AppLanguage) -> String, val undo: suspend () -> Unit)
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DayViewModel(private val container: AppContainer) : ViewModel() {
@@ -65,18 +67,20 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
     fun postpone(item: TaskItem) = viewModelScope.launch {
         if (item.isRecurring) {
             repository.setSkipped(item.taskId, item.day, skipped = true)
-            offerUndo("Пропущено: ${item.title}") { repository.setSkipped(item.taskId, item.day, skipped = false) }
+            offerUndo({ it.pick("Пропущено: ", "Skipped: ") + item.title }) { repository.setSkipped(item.taskId, item.day, skipped = false) }
         } else {
             val target = if (item.overdue) today.value else item.day.plusDays(1)
             repository.moveTo(item.taskId, target)
-            val message = if (item.overdue) "Перенесено на сегодня" else "Перенесено на завтра"
-            offerUndo(message) { repository.moveTo(item.taskId, item.day) }
+            val overdue = item.overdue
+            offerUndo({ lang ->
+                if (overdue) lang.pick("Перенесено на сегодня", "Moved to today") else lang.pick("Перенесено на завтра", "Moved to tomorrow")
+            }) { repository.moveTo(item.taskId, item.day) }
         }
     }
 
     fun delete(taskId: Long) = viewModelScope.launch {
         val deleted = repository.delete(taskId) ?: return@launch
-        offerUndo("Удалено: ${deleted.title}") { repository.restore(deleted) }
+        offerUndo({ it.pick("Удалено: ", "Deleted: ") + deleted.title }) { repository.restore(deleted) }
     }
 
     fun performUndo() {
@@ -89,7 +93,7 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
         if (_undo.value?.id == id) _undo.value = null
     }
 
-    private fun offerUndo(message: String, undo: suspend () -> Unit) {
+    private fun offerUndo(message: (AppLanguage) -> String, undo: suspend () -> Unit) {
         _undo.value = UndoEvent(System.nanoTime(), message, undo)
     }
 }

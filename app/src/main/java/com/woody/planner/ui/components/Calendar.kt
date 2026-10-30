@@ -38,6 +38,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.woody.planner.domain.DaySummary
+import com.woody.planner.ui.i18n.appLocale
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
@@ -47,9 +49,7 @@ import java.time.YearMonth
 import java.time.format.TextStyle
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
-import java.util.Locale
 
-val RuLocale: Locale = Locale.forLanguageTag("ru")
 
 fun LocalDate.weekStart(): LocalDate = with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
@@ -138,7 +138,7 @@ private fun WeekRow(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    day.dayOfWeek.getDisplayName(TextStyle.SHORT, RuLocale),
+                    day.dayOfWeek.getDisplayName(TextStyle.SHORT, appLocale),
                     style = MaterialTheme.typography.labelSmall,
                     color = textColor.copy(alpha = 0.7f),
                 )
@@ -196,7 +196,7 @@ fun MonthCalendar(
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 WoodyIcons.ChevronLeft,
-                contentDescription = "Предыдущий месяц",
+                contentDescription = tr("Предыдущий месяц", "Previous month"),
                 tint = colors.textSecondary,
                 modifier = Modifier
                     .size(36.dp)
@@ -215,8 +215,9 @@ fun MonthCalendar(
                 contentAlignment = Alignment.Center,
                 label = "monthTitle",
             ) { m ->
+                val locale = appLocale
                 Text(
-                    m.month.getDisplayName(TextStyle.FULL_STANDALONE, RuLocale).replaceFirstChar { it.titlecase(RuLocale) } +
+                    m.month.getDisplayName(TextStyle.FULL_STANDALONE, locale).replaceFirstChar { it.titlecase(locale) } +
                         if (m.year != today.year) " ${m.year}" else "",
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
@@ -226,7 +227,7 @@ fun MonthCalendar(
             }
             Icon(
                 WoodyIcons.ChevronRight,
-                contentDescription = "Следующий месяц",
+                contentDescription = tr("Следующий месяц", "Next month"),
                 tint = colors.textSecondary,
                 modifier = Modifier
                     .size(36.dp)
@@ -239,7 +240,7 @@ fun MonthCalendar(
         Row(Modifier.fillMaxWidth()) {
             DayOfWeek.entries.forEach {
                 Text(
-                    it.getDisplayName(TextStyle.SHORT, RuLocale),
+                    it.getDisplayName(TextStyle.SHORT, appLocale),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textTertiary,

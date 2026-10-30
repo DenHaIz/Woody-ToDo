@@ -22,6 +22,12 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -65,23 +71,32 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.woody.planner.AppContainer
 import com.woody.planner.R
+import com.woody.planner.data.AppLanguage
 import com.woody.planner.data.SwipeStyle
 import com.woody.planner.data.ThemeMode
 import com.woody.planner.domain.Category
 import com.woody.planner.reminders.Notifications
+import com.woody.planner.reminders.OemPower
 import com.woody.planner.ui.categories.CategoriesViewModel
 import com.woody.planner.ui.categories.CategoryEditorSheet
 import com.woody.planner.ui.categories.CategoryEmoji
@@ -96,6 +111,8 @@ import com.woody.planner.ui.components.bouncyClickable
 import com.woody.planner.ui.glass.FrostedCard
 import com.woody.planner.ui.glass.LocalHazeState
 import com.woody.planner.ui.glass.liquidGlass
+import com.woody.planner.ui.i18n.LocalLanguage
+import com.woody.planner.ui.i18n.tr
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
 import com.woody.planner.ui.theme.WoodyIcons
@@ -124,8 +141,8 @@ fun SettingsPage(
     LaunchedEffect(visible) {
         progress.animateTo(
             if (visible) 1f else 0f,
-            // Раскрытие — длинное и плавное (замедляется к концу), сворачивание — чуть быстрее.
-            if (visible) tween(620, easing = RevealEasing) else tween(460, easing = CollapseEasing),
+            // Равномерное движение: мягко трогается и мягко встаёт, без затяжного торможения во второй половине.
+            if (visible) tween(RevealMs, easing = EvenEasing) else tween(CollapseMs, easing = EvenEasing),
         )
     }
     val isVisible by rememberUpdatedState(visible)
@@ -222,8 +239,10 @@ fun SettingsPage(
     }
 }
 
-private val RevealEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-private val CollapseEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+/** Почти линейная кривая: скорость в середине лишь на треть выше, чем у краёв. */
+private val EvenEasing = CubicBezierEasing(0.3f, 0.15f, 0.7f, 0.85f)
+private const val RevealMs = 500
+private const val CollapseMs = 420
 
 /** Скруглённый прямоугольник, растущий из [from] (кнопка) до размеров экрана по [progress]. */
 private class RevealShape(private val from: Rect, private val progress: Float, private val extraCorner: Float) : Shape {
@@ -259,12 +278,16 @@ private fun SettingsContent(
     val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
     val notificationsAllowed = remember(lifecycleState) { Notifications.canPost(context) }
     val exactAllowed = remember(lifecycleState) { container.reminders.canScheduleExact }
-    val batteryUnrestricted = remember(lifecycleState) { Notifications.isBatteryUnrestricted(context) }
-    var testSent by remember { mutableStateOf(false) }
-    LaunchedEffect(testSent) {
-        if (testSent) {
-            delay(TestDelayMs + 4_000)
-            testSent = false
+    val batteryUnrestricted = remember(lifecycleState) { OemPower.isBatteryUnrestricted(context) }
+    val autostart = remember(lifecycleState) { OemPower.autostartAllowed(context) }
+    val alarmClock by container.settings.alarmClockReminders.collectAsStateWithLifecycle(true)
+    val lang = LocalLanguage.current
+    // Обратный отсчёт пробного напоминания; 0 — не отправлено.
+    var testLeft by remember { mutableIntStateOf(0) }
+    LaunchedEffect(testLeft > 0) {
+        while (testLeft > 0) {
+            delay(1_000)
+            testLeft--
         }
     }
     val ordered by categoriesVm.recentFirst.collectAsStateWithLifecycle()
@@ -282,7 +305,7 @@ private fun SettingsContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SettingsCard(
-                title = "Категории",
+                title = tr("Категории", "Categories"),
                 onHeaderClick = if (ordered.size > RecentCount) ({ categoriesExpanded = !categoriesExpanded }) else null,
             ) {
                 // Свёрнуто — три последних изменённых; по нажатию раскрывается весь список.
@@ -313,11 +336,11 @@ private fun SettingsContent(
                         Icon(WoodyIcons.Plus, contentDescription = null, tint = colors.accent, modifier = Modifier.size(20.dp))
                     }
                     Spacer(Modifier.size(12.dp))
-                    Text("Новая категория", style = MaterialTheme.typography.labelLarge, color = colors.accent, maxLines = 1)
+                    Text(tr("Новая категория", "New category"), style = MaterialTheme.typography.labelLarge, color = colors.accent, maxLines = 1)
                 }
             }
 
-            SettingsCard("Оформление") {
+            SettingsCard(tr("Оформление", "Appearance")) {
                 LiquidSegmented(
                     count = ThemeMode.entries.size,
                     selectedIndex = theme.ordinal,
@@ -330,14 +353,40 @@ private fun SettingsContent(
                         .background(colors.chip),
                 ) { index, selected ->
                     FitText(
-                        listOf("Системная", "Светлая", "Тёмная")[index],
+                        listOf(tr("Системная", "System"), tr("Светлая", "Light"), tr("Тёмная", "Dark"))[index],
                         style = MaterialTheme.typography.labelMedium,
                         color = if (selected) colors.background else colors.textPrimary,
                     )
                 }
             }
 
-            SettingsCard("Анимация свайпа") {
+            SettingsCard(tr("Язык", "Language")) {
+                LiquidSegmented(
+                    count = AppLanguage.entries.size,
+                    selectedIndex = lang.ordinal,
+                    onSelect = { index ->
+                        val language = AppLanguage.entries[index]
+                        scope.launch {
+                            container.settings.setLanguage(language)
+                            container.repository.translateDefaultCategories(language)
+                        }
+                    },
+                    pillColor = colors.textPrimary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(Shapes.Pill)
+                        .background(colors.chip),
+                ) { index, selected ->
+                    FitText(
+                        AppLanguage.entries[index].title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) colors.background else colors.textPrimary,
+                    )
+                }
+            }
+
+            SettingsCard(tr("Анимация свайпа", "Swipe animation")) {
                 LiquidSegmented(
                     count = SwipeStyle.entries.size,
                     selectedIndex = swipeStyle.ordinal,
@@ -350,7 +399,7 @@ private fun SettingsContent(
                         .background(colors.chip),
                 ) { index, selected ->
                     FitText(
-                        SwipeStyle.entries[index].title,
+                        SwipeStyle.entries[index].title(lang),
                         style = MaterialTheme.typography.labelMedium,
                         color = if (selected) Color.White else colors.textPrimary,
                     )
@@ -361,31 +410,33 @@ private fun SettingsContent(
                     label = "swipeDescription",
                 ) { style ->
                     Text(
-                        style.description,
+                        style.description(lang),
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 10.dp, start = 4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp, bottom = 10.dp, start = 4.dp, end = 4.dp),
                     )
                 }
                 SwipeDemo(swipeStyle)
             }
 
-            SettingsCard("Напоминания") {
+            SettingsCard(tr("Напоминания", "Reminders")) {
                 PermissionRow(
-                    title = "Уведомления",
-                    status = if (notificationsAllowed) "Разрешены, со стуком дятла" else "Выключены",
+                    title = tr("Уведомления", "Notifications"),
+                    status = if (notificationsAllowed) tr("Разрешены, со стуком дятла", "Allowed, with a woodpecker knock") else tr("Выключены", "Turned off"),
                     ok = notificationsAllowed,
-                    action = "Разрешить",
+                    action = tr("Разрешить", "Allow"),
                     onAction = onRequestNotifications,
                 )
                 Spacer(Modifier.height(12.dp))
                 PermissionRow(
-                    title = "Точное время",
-                    status = if (exactAllowed) "Минута в минуту" else "Возможна задержка",
+                    title = tr("Точное время", "Exact time"),
+                    status = if (exactAllowed) tr("Минута в минуту", "To the minute") else tr("Возможна задержка", "May be late"),
                     ok = exactAllowed,
-                    action = "Открыть",
+                    action = tr("Открыть", "Open"),
                     onAction = {
                         context.startActivity(
                             Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, "package:${context.packageName}".toUri()),
@@ -393,43 +444,92 @@ private fun SettingsContent(
                     },
                 )
                 Spacer(Modifier.height(12.dp))
-                // Необязательно: нужно лишь прошивкам, которые «замораживают» закрытые приложения.
-                PermissionRow(
-                    title = "Без ограничений",
-                    status = if (batteryUnrestricted) "Система не отменит напоминания" else "Если напоминания опаздывают",
-                    ok = batteryUnrestricted,
-                    optional = true,
-                    action = "Включить",
-                    onAction = {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, "package:${context.packageName}".toUri()),
-                            )
-                        }.onFailure {
-                            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                ToggleRow(
+                    title = tr("Как будильник", "As an alarm"),
+                    status = if (alarmClock) {
+                        tr("Надёжнее всего · значок будильника в строке состояния", "Most reliable · alarm icon in the status bar")
+                    } else {
+                        tr("Обычный точный будильник, без значка", "Regular exact alarm, no icon")
+                    },
+                    checked = alarmClock,
+                    onChange = { enabled ->
+                        scope.launch {
+                            container.settings.setAlarmClockReminders(enabled)
+                            container.reminders.rescheduleAll()
                         }
                     },
                 )
+                if (OemPower.needsAutostart) {
+                    // Xiaomi, Huawei, Oppo, Vivo: без автозапуска закрытое приложение не получает будильники.
+                    Spacer(Modifier.height(12.dp))
+                    PermissionRow(
+                        title = tr("Автозапуск", "Autostart"),
+                        status = when (autostart) {
+                            true -> tr("Включён", "Enabled")
+                            false -> tr("Выключен — напоминания не придут", "Off — reminders won't arrive")
+                            null -> tr("Включите для Woody в настройках телефона", "Turn it on for Woody in phone settings")
+                        },
+                        ok = autostart == true,
+                        optional = autostart == null,
+                        action = tr("Открыть", "Open"),
+                        onAction = { OemPower.openAutostart(context) },
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                PermissionRow(
+                    title = tr("Без ограничений", "Unrestricted"),
+                    status = when {
+                        batteryUnrestricted -> tr("Экономия заряда не мешает напоминаниям", "Battery saver won't block reminders")
+                        OemPower.vendor == OemPower.Vendor.Xiaomi -> tr("Выберите «Нет ограничений»", "Choose \"No restrictions\"")
+                        OemPower.needsAutostart -> tr("Снимите ограничения батареи", "Remove battery restrictions")
+                        else -> tr("Если напоминания опаздывают", "If reminders come late")
+                    },
+                    ok = batteryUnrestricted,
+                    // На «агрессивных» прошивках без этого напоминания закрытого приложения не приходят.
+                    optional = !OemPower.needsAutostart,
+                    action = tr("Открыть", "Open"),
+                    onAction = { OemPower.openBatterySettings(context) },
+                )
                 Spacer(Modifier.height(14.dp))
                 TestReminderButton(
-                    sent = testSent,
+                    secondsLeft = testLeft,
                     onClick = {
                         if (!notificationsAllowed) {
                             onRequestNotifications()
                         } else {
-                            container.reminders.scheduleTest(TestDelayMs)
-                            testSent = true
+                            scope.launch { container.reminders.scheduleTest(TestDelayMs) }
+                            testLeft = (TestDelayMs / 1000).toInt()
                         }
                     },
                 )
+                AnimatedVisibility(
+                    visible = testLeft > 0,
+                    enter = expandVertically(Motion.soft()) + fadeIn(Motion.snappy()),
+                    exit = shrinkVertically(Motion.soft()) + fadeOut(Motion.snappy()),
+                ) {
+                    Text(
+                        tr(
+                            "Смахните Woody из недавних приложений — так проверится, придёт ли напоминание при закрытом приложении.",
+                            "Swipe Woody away from recent apps to check that reminders arrive while the app is closed.",
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(top = 10.dp, start = 4.dp, end = 4.dp),
+                    )
+                }
             }
 
-            SettingsCard("Батарея") {
+            SettingsCard(tr("Батарея", "Battery")) {
                 Text(
-                    "Woody ничего не делает в фоне: нет служб, синхронизации и периодических проверок. " +
-                        "На каждое напоминание ставится один системный будильник — телефон просыпается " +
-                        "на долю секунды только в нужную минуту. Так напоминания приходят вовремя, " +
-                        "а расход заряда остаётся незаметным.",
+                    tr(
+                        "Woody ничего не делает в фоне: нет служб, синхронизации и периодических проверок. " +
+                            "На каждое напоминание ставится один системный будильник — телефон просыпается " +
+                            "на долю секунды только в нужную минуту. Так напоминания приходят вовремя, " +
+                            "а расход заряда остаётся незаметным.",
+                        "Woody does nothing in the background: no services, sync or periodic checks. " +
+                            "Each reminder sets a single system alarm — the phone wakes for a split second " +
+                            "only at the right minute. Reminders arrive on time and the battery use is negligible.",
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary,
                 )
@@ -442,7 +542,7 @@ private fun SettingsContent(
                     Column {
                         Text("Woody", style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
                         val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
-                        Text("Ежедневник · версия $version", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                        Text(tr("Ежедневник · версия ", "Daily planner · version ") + version, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                     }
                 }
             }
@@ -462,7 +562,7 @@ private fun SettingsContent(
         ) {
             Icon(
                 WoodyIcons.ChevronLeft,
-                contentDescription = "Назад",
+                contentDescription = tr("Назад", "Back"),
                 tint = colors.textPrimary,
                 modifier = Modifier
                     .size(48.dp)
@@ -470,7 +570,7 @@ private fun SettingsContent(
                     .bouncyClickable(onClick = onClose)
                     .padding(12.dp),
             )
-            FitText("Настройки", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
+            FitText(tr("Настройки", "Settings"), style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
         }
     }
 }
@@ -480,8 +580,8 @@ private fun SettingsContent(
 private fun SwipeDemo(style: SwipeStyle) {
     val colors = WoodyTheme.colors
     SwipeableTaskCard(
-        startAction = SwipeAction(WoodyIcons.Check, "Готово", colors.success, dismiss = false) {},
-        endAction = SwipeAction(WoodyIcons.ArrowRight, "На завтра", colors.warning, dismiss = false) {},
+        startAction = SwipeAction(WoodyIcons.Check, tr("Готово", "Done"), colors.success, dismiss = false) {},
+        endAction = SwipeAction(WoodyIcons.ArrowRight, tr("На завтра", "Tomorrow"), colors.warning, dismiss = false) {},
         style = style,
     ) {
         FrostedCard(
@@ -498,7 +598,7 @@ private fun SwipeDemo(style: SwipeStyle) {
             ) {
                 Icon(WoodyIcons.ChevronLeft, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(18.dp))
                 FitText(
-                    "Свайпните меня",
+                    tr("Свайпните меня", "Swipe me"),
                     style = MaterialTheme.typography.titleMedium,
                     color = colors.textPrimary,
                     modifier = Modifier
@@ -532,7 +632,7 @@ private fun CategoryRow(category: Category, count: Int, onClick: () -> Unit) {
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
             FitText(category.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-            Text(tasksWord(count), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
+            Text(tasksWord(count, LocalLanguage.current), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1)
         }
         Box(
             Modifier
@@ -577,8 +677,8 @@ private fun SettingsCard(
 /** Сколько недавно изменённых категорий видно в свёрнутом списке. */
 private const val RecentCount = 3
 
-/** Через сколько придёт пробное напоминание. */
-private const val TestDelayMs = 5_000L
+/** Через сколько придёт пробное напоминание: хватает, чтобы закрыть приложение. */
+private const val TestDelayMs = 30_000L
 
 @Composable
 private fun ExpandRow(expanded: Boolean, total: Int, onClick: () -> Unit) {
@@ -592,7 +692,7 @@ private fun ExpandRow(expanded: Boolean, total: Int, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (expanded) "Свернуть" else "Все категории · $total",
+            if (expanded) tr("Свернуть", "Collapse") else tr("Все категории", "All categories") + " · $total",
             style = MaterialTheme.typography.labelLarge,
             color = colors.textSecondary,
             maxLines = 1,
@@ -613,7 +713,8 @@ private fun ExpandRow(expanded: Boolean, total: Int, onClick: () -> Unit) {
 
 /** Пробное напоминание: проверяет разрешения, канал и звук, не дожидаясь настоящей задачи. */
 @Composable
-private fun TestReminderButton(sent: Boolean, onClick: () -> Unit) {
+private fun TestReminderButton(secondsLeft: Int, onClick: () -> Unit) {
+    val sent = secondsLeft > 0
     val colors = WoodyTheme.colors
     Row(
         Modifier
@@ -630,9 +731,58 @@ private fun TestReminderButton(sent: Boolean, onClick: () -> Unit) {
         Spacer(Modifier.size(8.dp))
         AnimatedContent(sent, transitionSpec = { fadeIn(Motion.snappy()) togetherWith fadeOut(Motion.snappy()) }, label = "test") { done ->
             FitText(
-                if (done) "Придёт через 5 секунд — можно свернуть" else "Проверить напоминание",
+                if (done) tr("Придёт через $secondsLeft с", "Arrives in $secondsLeft s") else tr("Проверить напоминание", "Test a reminder"),
                 style = MaterialTheme.typography.labelLarge,
                 color = colors.accent,
+            )
+        }
+    }
+}
+
+/** Строка с переключателем: капля-бегунок перетекает пружиной. */
+@Composable
+private fun ToggleRow(title: String, status: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val colors = WoodyTheme.colors
+    val track by animateColorAsState(if (checked) colors.success else colors.chip, Motion.snappy(), label = "track")
+    val knob by animateFloatAsState(if (checked) 1f else 0f, Motion.bouncy(), label = "knob")
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .bouncyClickable(pressedScale = 0.98f) { onChange(!checked) }
+            .semantics(mergeDescendants = true) {
+                role = Role.Switch
+                toggleableState = ToggleableState(checked)
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .background(if (checked) colors.success else colors.textTertiary, Shapes.Pill),
+        )
+        Spacer(Modifier.size(12.dp))
+        Column(Modifier.weight(1f)) {
+            FitText(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+            Text(status, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 2)
+        }
+        Box(
+            Modifier
+                .padding(start = 12.dp)
+                .size(width = 52.dp, height = 32.dp)
+                .clip(Shapes.Pill)
+                .background(track)
+                .padding(3.dp),
+        ) {
+            Box(
+                Modifier
+                    .offset { IntOffset((20.dp.toPx() * knob).roundToInt(), 0) }
+                    .size(26.dp)
+                    .graphicsLayer {
+                        // Бегунок слегка растягивается в движении — как капля.
+                        val stretch = 1f + 0.25f * (1f - kotlin.math.abs(knob * 2f - 1f))
+                        scaleX = stretch
+                    }
+                    .background(Color.White, CircleShape),
             )
         }
     }

@@ -6,14 +6,18 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.woody.planner.WoodyApp
+import com.woody.planner.data.AppLanguage
 import com.woody.planner.data.TaskDraft
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowAlarmManager
 import org.robolectric.annotation.Config
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -30,6 +34,12 @@ class ReminderFlowTest {
     private val alarms get() = shadowOf(app.getSystemService(AlarmManager::class.java))
     private val notifications get() = app.getSystemService(NotificationManager::class.java)
 
+    /** На телефоне точные будильники разрешены сразу (USE_EXACT_ALARM); в Robolectric — включаем явно. */
+    @Before
+    fun allowExactAlarms() {
+        ShadowAlarmManager.setCanScheduleExactAlarms(true)
+    }
+
     @Test
     fun reminderFiresAtExactMinuteAndPostsNotification() {
         val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
@@ -39,14 +49,15 @@ class ReminderFlowTest {
             )
         }
 
-        // Ровно один будильник, точный, за 10 минут до задачи.
+        // Ровно один будильник — системный «будильник-часы» (его не откладывает сон и не отменяют прошивки),
+        // за 10 минут до задачи.
         val scheduled = alarms.scheduledAlarms
         assertEquals(1, scheduled.size)
         val alarm = alarms.peekNextScheduledAlarm()
         assertNotNull(alarm)
         val expected = at.minusMinutes(10).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         assertEquals(expected, alarm!!.triggerAtTime)
-        assertTrue("будильник должен будить устройство", alarm.allowWhileIdle)
+        assertEquals(expected, app.getSystemService(AlarmManager::class.java).nextAlarmClock?.triggerTime)
 
         // Срабатывание будильника → уведомление.
         alarm.operation!!.send()
@@ -58,13 +69,43 @@ class ReminderFlowTest {
     }
 
     @Test
+    fun withoutAlarmClockModeUsesExactIdleAlarm() {
+        val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
+        runBlocking {
+            app.container.settings.setAlarmClockReminders(false)
+            app.container.repository.save(
+                TaskDraft(title = "Курица", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 0),
+            )
+        }
+        val alarm = alarms.peekNextScheduledAlarm()
+        assertNotNull(alarm)
+        assertEquals(at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), alarm!!.triggerAtTime)
+        assertTrue("будильник должен будить устройство", alarm.allowWhileIdle)
+        assertNull(app.getSystemService(AlarmManager::class.java).nextAlarmClock)
+        runBlocking { app.container.settings.setAlarmClockReminders(true) }
+    }
+
+    @Test
     fun testReminderFromSettingsPostsNotification() {
-        app.container.reminders.scheduleTest(5_000)
+        runBlocking { app.container.reminders.scheduleTest(5_000) }
         val alarm = alarms.peekNextScheduledAlarm()
         assertNotNull(alarm)
         alarm!!.operation!!.send()
         waitFor { notifications.activeNotifications.isNotEmpty() }
         assertEquals("Woody на связи", notifications.activeNotifications.single().notification.extras.getString("android.title"))
+    }
+
+    @Test
+    fun notificationFollowsAppLanguage() {
+        runBlocking {
+            app.container.settings.setLanguage(AppLanguage.English)
+            app.container.reminders.scheduleTest(5_000)
+        }
+        alarms.peekNextScheduledAlarm()!!.operation!!.send()
+        waitFor { notifications.activeNotifications.isNotEmpty() }
+        assertEquals("Woody is here", notifications.activeNotifications.single().notification.extras.getString("android.title"))
+        assertEquals("Task reminders", notifications.getNotificationChannel("reminders_knock").name)
+        runBlocking { app.container.settings.setLanguage(AppLanguage.Russian) }
     }
 
     /** Приёмник работает в фоновой корутине (goAsync) — ждём результат, прокручивая главный поток. */

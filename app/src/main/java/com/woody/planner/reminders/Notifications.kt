@@ -9,11 +9,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.woody.planner.MainActivity
 import com.woody.planner.R
+import com.woody.planner.data.AppLanguage
 import com.woody.planner.domain.Task
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -24,14 +24,18 @@ object Notifications {
     private const val LEGACY_CHANNEL_ID = "reminders"
     const val EXTRA_OPEN_DAY = "open_day"
 
-    fun ensureChannel(context: Context) {
+    /** Создаёт канал или обновляет его название на текущем языке (звук и важность при этом не меняются). */
+    fun ensureChannel(context: Context, lang: AppLanguage) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
-        if (manager.getNotificationChannel(CHANNEL_ID) != null) return
         val sound = "${ContentResolver.SCHEME_ANDROID_RESOURCE}://${context.packageName}/${R.raw.woody_knock}".toUri()
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Напоминания о задачах", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Уведомления в заданное время со стуком дятла"
+            NotificationChannel(
+                CHANNEL_ID,
+                lang.pick("Напоминания о задачах", "Task reminders"),
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = lang.pick("Уведомления в заданное время со стуком дятла", "On-time notifications with a woodpecker knock")
                 setSound(
                     sound,
                     AudioAttributes.Builder()
@@ -53,9 +57,9 @@ object Notifications {
 
     const val PERMISSION = "android.permission.POST_NOTIFICATIONS"
 
-    fun show(context: Context, task: Task, occurrence: LocalDate) {
+    fun show(context: Context, task: Task, occurrence: LocalDate, lang: AppLanguage) {
         if (!canPost(context)) return
-        ensureChannel(context)
+        ensureChannel(context, lang)
         val id = task.id.toInt()
         val open = PendingIntent.getActivity(
             context,
@@ -76,13 +80,13 @@ object Notifications {
             .setSmallIcon(R.drawable.ic_stat_woody)
             .setColor(0xFFE63946.toInt())
             .setContentTitle(task.title)
-            .setContentText(text.ifEmpty { "Пора заняться задачей" })
+            .setContentText(text.ifEmpty { lang.pick("Пора заняться задачей", "Time for this task") })
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(open)
-            .addAction(0, "Готово", actionIntent(context, ReminderReceiver.ACTION_DONE, task.id, occurrence, 1))
-            .addAction(0, "Через 15 мин", actionIntent(context, ReminderReceiver.ACTION_SNOOZE, task.id, occurrence, 2))
+            .addAction(0, lang.pick("Готово", "Done"), actionIntent(context, ReminderReceiver.ACTION_DONE, task.id, occurrence, 1))
+            .addAction(0, lang.pick("Через 15 мин", "In 15 min"), actionIntent(context, ReminderReceiver.ACTION_SNOOZE, task.id, occurrence, 2))
             .build()
         try {
             NotificationManagerCompat.from(context).notify(id, notification)
@@ -92,9 +96,9 @@ object Notifications {
     }
 
     /** Пробное уведомление из настроек: так будут выглядеть и звучать напоминания. */
-    fun showTest(context: Context) {
+    fun showTest(context: Context, lang: AppLanguage) {
         if (!canPost(context)) return
-        ensureChannel(context)
+        ensureChannel(context, lang)
         val open = PendingIntent.getActivity(
             context,
             TEST_ID,
@@ -104,8 +108,8 @@ object Notifications {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_woody)
             .setColor(0xFFE63946.toInt())
-            .setContentTitle("Woody на связи")
-            .setContentText("Так будут приходить напоминания — со стуком дятла")
+            .setContentTitle(lang.pick("Woody на связи", "Woody is here"))
+            .setContentText(lang.pick("Так будут приходить напоминания — со стуком дятла", "This is how reminders arrive — with a woodpecker knock"))
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
@@ -116,10 +120,6 @@ object Notifications {
         } catch (_: SecurityException) {
         }
     }
-
-    /** Не мешает ли системная оптимизация батареи будильникам (на ряде прошивок закрытые приложения «замораживаются»). */
-    fun isBatteryUnrestricted(context: Context): Boolean =
-        context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
 
     private const val TEST_ID = Int.MAX_VALUE - 7
 
