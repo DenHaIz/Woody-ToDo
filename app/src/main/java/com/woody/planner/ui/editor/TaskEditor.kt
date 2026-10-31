@@ -257,8 +257,11 @@ private fun EditorContent(
 
         PlainField(
             value = draft.title,
-            onValueChange = { onChange(draft.copy(title = it)) },
+            // Перевод строки в названии не нужен: «Готово» на клавиатуре закрывает ввод.
+            onValueChange = { onChange(draft.copy(title = it.replace('\n', ' '))) },
             placeholder = tr("Что нужно сделать?", "What needs doing?"),
+            singleLine = false,
+            maxLines = 5,
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier
                 .fillMaxWidth()
@@ -968,6 +971,7 @@ private fun PlainField(
     style: TextStyle,
     modifier: Modifier = Modifier,
     singleLine: Boolean = true,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     imeAction: ImeAction = ImeAction.Default,
     onImeAction: () -> Unit = {},
 ) {
@@ -978,6 +982,7 @@ private fun PlainField(
         onValueChange = onValueChange,
         textStyle = textStyle,
         singleLine = singleLine,
+        maxLines = maxLines,
         cursorBrush = SolidColor(colors.accent),
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = imeAction),
         keyboardActions = KeyboardActions(onDone = { onImeAction() }),

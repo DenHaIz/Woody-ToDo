@@ -112,6 +112,8 @@ class TaskRepository(
     suspend fun setDone(taskId: Long, day: LocalDate, done: Boolean) {
         val entity = CompletionEntity(taskId, day.toEpochDay())
         if (done) tasks.insertCompletion(entity) else tasks.deleteCompletion(entity)
+        // Выполнили в приложении — висящее напоминание о задаче больше не нужно.
+        if (done) reminders.dismissNotification(taskId)
         reminders.schedule(taskId)
     }
 

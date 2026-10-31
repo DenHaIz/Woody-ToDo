@@ -14,6 +14,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -63,6 +66,8 @@ class InteractionTest {
         }
         compose.setContent { App() }
         compose.waitForIdle()
+        // Список читается из базы в фоне — ждём, пока задачи появятся на экране.
+        awaitText("Купить курицу")
     }
 
     @androidx.compose.runtime.Composable
@@ -304,5 +309,19 @@ class InteractionTest {
         compose.onNodeWithText("Новая задача").assertExists()
         // Новое открытие — чистый черновик.
         compose.onAllNodes(hasSetTextAction() and hasText("Купить хлеб")).assertCountEquals(0)
+    }
+
+    @Test
+    fun doubleTapOnEmptySpaceOpensNewTask() {
+        start()
+        val empty = { w: Float, h: Float -> androidx.compose.ui.geometry.Offset(w * 0.3f, h * 0.7f) }
+        // Одно касание по пустому месту ничего не делает.
+        compose.onRoot().performTouchInput { click(empty(width.toFloat(), height.toFloat())) }
+        compose.waitForIdle()
+        compose.onAllNodesWithText("Новая задача").assertCountEquals(0)
+        // Пустое место под задачами, слева от кнопки «+».
+        compose.onRoot().performTouchInput { doubleClick(empty(width.toFloat(), height.toFloat())) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Новая задача").assertExists()
     }
 }

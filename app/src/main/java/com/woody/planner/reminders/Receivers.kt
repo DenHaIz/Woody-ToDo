@@ -45,6 +45,17 @@ class ReminderReceiver : BroadcastReceiver() {
                     if (task != null) Notifications.show(context, task, day, container.settings.language.first())
                     container.reminders.schedule(taskId)
                 }
+                ACTION_MISSED -> {
+                    val dao = container.database.taskDao()
+                    val task = dao.get(taskId)?.toDomain()
+                    val epochDay = day.toEpochDay()
+                    val handled = dao.completionsOf(taskId).any { it.epochDay == epochDay } ||
+                        dao.skipsOf(taskId).any { it.epochDay == epochDay }
+                    if (task != null && !handled) {
+                        Notifications.show(context, task, day, container.settings.language.first(), missed = true)
+                    }
+                    container.reminders.schedule(taskId)
+                }
                 ACTION_DONE -> {
                     Notifications.cancel(context, taskId)
                     container.repository.setDone(taskId, day, done = true)
@@ -62,6 +73,7 @@ class ReminderReceiver : BroadcastReceiver() {
         const val ACTION_DONE = "com.woody.planner.REMINDER_DONE"
         const val ACTION_SNOOZE = "com.woody.planner.REMINDER_SNOOZE"
         const val ACTION_TEST = "com.woody.planner.REMINDER_TEST"
+        const val ACTION_MISSED = "com.woody.planner.REMINDER_MISSED"
         const val EXTRA_TASK_ID = "task_id"
         const val EXTRA_EPOCH_DAY = "epoch_day"
     }

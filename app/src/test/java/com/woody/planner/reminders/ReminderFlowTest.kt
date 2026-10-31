@@ -108,6 +108,41 @@ class ReminderFlowTest {
         runBlocking { app.container.settings.setLanguage(AppLanguage.Russian) }
     }
 
+    @Test
+    fun missedNudgeFiresOnlyWhileTaskIsNotDone() {
+        val at = LocalDateTime.now().plusMinutes(20).withSecond(0).withNano(0)
+        val dueMillis = { m: Long -> at.plusMinutes(m).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli() }
+        val id = runBlocking {
+            app.container.settings.setMissedNudgeMinutes(30)
+            // Задача без напоминания: будильник нужен только для проверки «не выполнено».
+            app.container.repository.save(TaskDraft(title = "Тренировка", date = at.toLocalDate(), time = at.toLocalTime()))
+        }
+        val alarm = alarms.scheduledAlarms.single()
+        assertEquals(dueMillis(30), alarm.triggerAtTime)
+
+        alarm.operation!!.send()
+        waitFor { notifications.activeNotifications.isNotEmpty() }
+        val text = notifications.activeNotifications.single().notification.extras.getCharSequence("android.text").toString()
+        assertTrue(text, text.startsWith("Ещё не выполнено"))
+        notifications.cancelAll()
+
+        // Выполнили до проверки — будильник сработает (старый), но уведомления не будет.
+        runBlocking { app.container.repository.setDone(id, at.toLocalDate(), done = true) }
+        alarm.operation!!.send()
+        repeat(10) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }
+        assertTrue(notifications.activeNotifications.isEmpty())
+        runBlocking { app.container.settings.setMissedNudgeMinutes(0) }
+    }
+
+    @Test
+    fun missedNudgeIsOffByDefault() {
+        val at = LocalDateTime.now().plusMinutes(20).withSecond(0).withNano(0)
+        runBlocking {
+            app.container.repository.save(TaskDraft(title = "Без напоминаний", date = at.toLocalDate(), time = at.toLocalTime()))
+        }
+        assertTrue(alarms.scheduledAlarms.isEmpty())
+    }
+
     /** Приёмник работает в фоновой корутине (goAsync) — ждём результат, прокручивая главный поток. */
     private fun waitFor(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000

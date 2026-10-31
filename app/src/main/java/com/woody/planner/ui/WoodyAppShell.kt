@@ -153,7 +153,12 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
                     .hazeSource(hazeState, zIndex = 0f),
             )
 
-            DayScreen(dayVm, onEditTask = { editorVm.openEdit(it) }, bottomInset = bottomInset)
+            DayScreen(
+                dayVm,
+                onEditTask = { editorVm.openEdit(it) },
+                bottomInset = bottomInset,
+                onAddTask = { editorVm.openNew(selectedDay) },
+            )
 
             val undoMessage = undo?.let { Message(it.id, it.message(lang), lang.pick("Отменить", "Undo")) { dayVm.performUndo() } }
             MessageBar(

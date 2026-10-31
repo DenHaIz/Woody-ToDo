@@ -2,6 +2,9 @@ package com.woody.planner.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -11,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -23,7 +27,10 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
 import com.woody.planner.ui.theme.Motion
 
 /**
@@ -103,6 +110,38 @@ fun Modifier.pressGlow(interaction: MutableInteractionSource, color: Color, shap
                 radius = radius,
                 center = center,
             )
+        }
+    }
+}
+
+/**
+ * Двойное касание по пустому месту: срабатывает, только если касания не забрал никто из детей
+ * (карточки, кнопки) и это не прокрутка или свайп. Слушает последний проход событий, ничего не перехватывая.
+ */
+@Composable
+fun Modifier.onDoubleTapBackground(onDoubleTap: () -> Unit): Modifier {
+    val action by rememberUpdatedState(onDoubleTap)
+    return pointerInput(Unit) {
+        var lastUpTime = 0L
+        var lastUpPosition = Offset.Zero
+        val slop = 48.dp.toPx()
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+            val up = waitForUpOrCancellation(PointerEventPass.Final)
+            val isTap = up != null && !up.isConsumed &&
+                up.uptimeMillis - down.uptimeMillis < viewConfiguration.longPressTimeoutMillis
+            if (!isTap) {
+                lastUpTime = 0L
+                return@awaitEachGesture
+            }
+            val quick = lastUpTime != 0L && up.uptimeMillis - lastUpTime <= viewConfiguration.doubleTapTimeoutMillis
+            if (quick && (up.position - lastUpPosition).getDistance() < slop) {
+                lastUpTime = 0L
+                action()
+            } else {
+                lastUpTime = up.uptimeMillis
+                lastUpPosition = up.position
+            }
         }
     }
 }

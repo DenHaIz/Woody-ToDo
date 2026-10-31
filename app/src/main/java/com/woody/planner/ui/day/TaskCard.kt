@@ -23,6 +23,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -69,8 +73,13 @@ fun TaskCard(
     val colors = WoodyTheme.colors
     val haptics = LocalHapticFeedback.current
     val categoryColor = item.category?.let { Color(it.colorArgb) } ?: colors.accent
-    val expandable = item.subtasks.isNotEmpty() || item.note.isNotBlank()
     var expanded by rememberSaveable(item.taskId, item.day) { mutableStateOf(false) }
+    // Длинное название, не влезшее в две строки, тоже раскрывается — целиком.
+    var titleCut by remember(item.title) { mutableStateOf(false) }
+    val expandable = item.subtasks.isNotEmpty() || item.note.isNotBlank() || titleCut
+    // Раскрытая карточка занимает не больше ~3/4 экрана, остальное прокручивается внутри неё.
+    val maxExpandedHeight = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * 0.74f).toDp() }
+    val innerScroll = rememberScrollState()
     val alpha = animateFloatAsState(if (item.done) 0.6f else 1f, Motion.soft(), label = "doneAlpha")
     val chevron = animateFloatAsState(if (expanded) 180f else 0f, Motion.bouncy(), label = "chevron")
 
@@ -92,6 +101,7 @@ fun TaskCard(
                     onClick = { if (expandable) expanded = !expanded else onEdit() },
                 )
                 .animateContentSize(Motion.soft())
+                .then(if (expanded) Modifier.heightIn(max = maxExpandedHeight).verticalScroll(innerScroll) else Modifier)
                 .padding(start = 6.dp, end = 16.dp, top = if (large) 16.dp else 12.dp, bottom = if (large) 16.dp else 12.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = if (large) 80.dp else 64.dp)) {
@@ -108,7 +118,13 @@ fun TaskCard(
                         .padding(vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    StrikeText(item.title, struck = item.done, style = (if (large) LargeTitleStyle else TitleStyle).balanced())
+                    StrikeText(
+                        item.title,
+                        struck = item.done,
+                        style = (if (large) LargeTitleStyle else TitleStyle).balanced(),
+                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                        onOverflow = { if (!expanded) titleCut = it },
+                    )
                     TaskMeta(item, large)
                 }
                 if (expandable) {
@@ -184,7 +200,15 @@ private fun TaskMeta(item: TaskItem, large: Boolean) {
 
 /** Текст, который зачёркивается слева направо, строка за строкой. */
 @Composable
-fun StrikeText(text: String, struck: Boolean, style: TextStyle, modifier: Modifier = Modifier) {
+fun StrikeText(
+    text: String,
+    struck: Boolean,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    maxLines: Int = 2,
+    /** Сообщает, обрезан ли текст многоточием. */
+    onOverflow: (Boolean) -> Unit = {},
+) {
     val colors = WoodyTheme.colors
     val progress = animateFloatAsState(if (struck) 1f else 0f, Motion.soft(), label = "strike")
     val color by animateColorAsState(if (struck) colors.textTertiary else colors.textPrimary, Motion.snappy(), label = "strikeColor")
@@ -193,9 +217,12 @@ fun StrikeText(text: String, struck: Boolean, style: TextStyle, modifier: Modifi
         text = text,
         style = style,
         color = color,
-        maxLines = 2,
+        maxLines = maxLines,
         overflow = TextOverflow.Ellipsis,
-        onTextLayout = { layout = it },
+        onTextLayout = {
+            layout = it
+            onOverflow(it.hasVisualOverflow)
+        },
         modifier = modifier.drawWithContent {
             drawContent()
             val result = layout ?: return@drawWithContent

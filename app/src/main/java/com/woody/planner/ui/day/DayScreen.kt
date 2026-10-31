@@ -48,6 +48,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
@@ -74,6 +76,7 @@ import com.woody.planner.ui.components.SwipeAction
 import com.woody.planner.ui.components.SwipeableTaskCard
 import com.woody.planner.ui.components.WeekStrip
 import com.woody.planner.ui.components.bouncyClickable
+import com.woody.planner.ui.components.onDoubleTapBackground
 import com.woody.planner.ui.glass.LocalHazeState
 import com.woody.planner.ui.glass.liquidGlass
 import com.woody.planner.ui.theme.Motion
@@ -96,7 +99,10 @@ fun DayScreen(
     vm: DayViewModel,
     onEditTask: (Long) -> Unit,
     bottomInset: Dp,
+    /** Двойное касание по пустому месту — новая задача на открытый день. */
+    onAddTask: () -> Unit = {},
 ) {
+    val haptics = LocalHapticFeedback.current
     val today by vm.today.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val hazeState = LocalHazeState.current
@@ -134,7 +140,11 @@ fun DayScreen(
             state = pager,
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f) else Modifier),
+                .then(if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f) else Modifier)
+                .onDoubleTapBackground {
+                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                    onAddTask()
+                },
             beyondViewportPageCount = 1,
             key = { it },
         ) { page ->
@@ -430,7 +440,7 @@ private fun EmptyDay(modifier: Modifier) {
         Text(tr("Свободный день", "A free day"), style = MaterialTheme.typography.titleLarge, color = colors.textPrimary)
         Spacer(Modifier.height(4.dp))
         Text(
-            tr("Нажмите +, чтобы добавить задачу", "Tap + to add a task"),
+            tr("Нажмите + или дважды коснитесь экрана, чтобы добавить задачу", "Tap + or double-tap the screen to add a task"),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textSecondary,
             textAlign = TextAlign.Center,

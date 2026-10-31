@@ -57,7 +57,8 @@ object Notifications {
 
     const val PERMISSION = "android.permission.POST_NOTIFICATIONS"
 
-    fun show(context: Context, task: Task, occurrence: LocalDate, lang: AppLanguage) {
+    /** [missed] — проверка после времени задачи: задача ещё не выполнена. */
+    fun show(context: Context, task: Task, occurrence: LocalDate, lang: AppLanguage, missed: Boolean = false) {
         if (!canPost(context)) return
         ensureChannel(context, lang)
         val id = task.id.toInt()
@@ -70,10 +71,16 @@ object Notifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val text = buildString {
-            task.time?.let { append(it.format(DateTimeFormatter.ofPattern("HH:mm"))) }
-            if (task.note.isNotBlank()) {
-                if (isNotEmpty()) append(" · ")
-                append(task.note)
+            val time = task.time?.format(DateTimeFormatter.ofPattern("HH:mm"))
+            if (missed) {
+                append(lang.pick("Ещё не выполнено", "Not done yet"))
+                time?.let { append(lang.pick(" · время было $it", " · it was due at $it")) }
+            } else {
+                time?.let { append(it) }
+                if (task.note.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append(task.note)
+                }
             }
         }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)

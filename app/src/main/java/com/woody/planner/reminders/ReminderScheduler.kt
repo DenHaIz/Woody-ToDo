@@ -32,10 +32,12 @@ class ReminderScheduler(
 
     val canScheduleExact: Boolean get() = alarmManager.canScheduleExactAlarms()
 
+    /** Ставит (или снимает) оба будильника задачи: напоминание и проверку «не выполнено». */
     suspend fun schedule(taskId: Long) {
         val dao = taskDao()
         val task = dao.get(taskId)?.toDomain()
-        if (task == null || task.reminderOffsetMin == null) {
+        val nudge = settings().missedNudgeMinutes.first()
+        if (task == null || (task.reminderOffsetMin == null && (nudge == 0 || task.time == null))) {
             cancel(taskId)
             return
         }
@@ -43,17 +45,26 @@ class ReminderScheduler(
             dao.completionsOf(taskId).forEach { add(it.epochDay) }
             dao.skipsOf(taskId).forEach { add(it.epochDay) }
         }
-        val trigger = ReminderMath.nextTrigger(task, LocalDateTime.now()) { it.toEpochDay() in handled }
+        val now = LocalDateTime.now()
+        val trigger = ReminderMath.nextTrigger(task, now) { it.toEpochDay() in handled }
         if (trigger == null) {
-            cancel(taskId)
+            alarmManager.cancel(firePendingIntent(taskId, null))
         } else {
-            setAlarm(taskId, trigger.occurrence, trigger.at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+            setAlarm(taskId, trigger.occurrence, trigger.at.toMillis())
+        }
+        val missed = ReminderMath.nextMissedCheck(task, nudge, now) { it.toEpochDay() in handled }
+        if (missed == null) {
+            alarmManager.cancel(missedPendingIntent(taskId, null))
+        } else {
+            set(missed.at.toMillis(), missedPendingIntent(taskId, missed.occurrence), missed.occurrence)
         }
     }
 
     suspend fun rescheduleAll() {
-        taskDao().withReminders().forEach { schedule(it.id) }
+        taskDao().withAlarms().forEach { schedule(it.id) }
     }
+
+    private fun LocalDateTime.toMillis(): Long = atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     suspend fun snooze(taskId: Long, occurrence: LocalDate, minutes: Long) {
         setAlarm(taskId, occurrence, System.currentTimeMillis() + minutes * 60_000L)
@@ -70,8 +81,11 @@ class ReminderScheduler(
         set(System.currentTimeMillis() + delayMs, pending, openDay = null)
     }
 
+    fun dismissNotification(taskId: Long) = Notifications.cancel(context, taskId)
+
     fun cancel(taskId: Long) {
         alarmManager.cancel(firePendingIntent(taskId, null))
+        alarmManager.cancel(missedPendingIntent(taskId, null))
     }
 
     private companion object {
@@ -110,9 +124,16 @@ class ReminderScheduler(
         )
     }
 
-    private fun firePendingIntent(taskId: Long, occurrence: LocalDate?): PendingIntent {
+    private fun firePendingIntent(taskId: Long, occurrence: LocalDate?): PendingIntent =
+        taskPendingIntent(ReminderReceiver.ACTION_FIRE, taskId, occurrence)
+
+    /** Отдельное действие — отдельный PendingIntent: оба будильника задачи живут независимо. */
+    private fun missedPendingIntent(taskId: Long, occurrence: LocalDate?): PendingIntent =
+        taskPendingIntent(ReminderReceiver.ACTION_MISSED, taskId, occurrence)
+
+    private fun taskPendingIntent(action: String, taskId: Long, occurrence: LocalDate?): PendingIntent {
         val intent = Intent(context, ReminderReceiver::class.java)
-            .setAction(ReminderReceiver.ACTION_FIRE)
+            .setAction(action)
             .putExtra(ReminderReceiver.EXTRA_TASK_ID, taskId)
         occurrence?.let { intent.putExtra(ReminderReceiver.EXTRA_EPOCH_DAY, it.toEpochDay()) }
         return PendingIntent.getBroadcast(

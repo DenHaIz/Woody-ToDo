@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -211,6 +212,22 @@ class ScreenshotTest {
         shot("en_settings_reminders")
     }
 
+    /** Длинное название обрезается в списке, а по нажатию карточка раскрывается и показывает его целиком. */
+    @Test
+    fun longTitleExpands() {
+        val long = "Записаться к стоматологу на следующую неделю после обеда и заодно уточнить, " +
+            "нужен ли снимок, сколько стоит лечение и можно ли перенести приём на субботу утром"
+        runBlocking { container.repository.save(TaskDraft(title = long, date = LocalDate.now())) }
+        render(dark = false)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(long).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("Развернуть").assertExists()
+        shot("long_title_collapsed")
+        compose.onNodeWithText(long).performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Свернуть").assertExists()
+        shot("long_title_expanded")
+    }
+
     @Test
     fun editorPopups() {
         seed()
@@ -266,15 +283,18 @@ class ScreenshotTest {
     }
 
     /** Покадрово: палец тянет карточку, отпускает, анимация доигрывает. */
-    private fun swipeFrames(style: SwipeStyle, name: String) {
+    private fun swipeFrames(style: SwipeStyle, name: String, grabAt: Float = 0.5f, leftward: Boolean = false) {
         runBlocking { container.settings.setSwipeStyle(style) }
         seed()
         render(dark = false)
         compose.mainClock.autoAdvance = false
         val node = compose.onNodeWithText("Купить курицу")
-        node.performTouchInput { down(androidx.compose.ui.geometry.Offset(left + 40f, centerY)) }
+        node.performTouchInput {
+            val x = if (leftward) right - 40f else left + 40f
+            down(androidx.compose.ui.geometry.Offset(x, top + height * grabAt))
+        }
         repeat(12) {
-            node.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(width * 0.05f, 0f)) }
+            node.performTouchInput { moveBy(androidx.compose.ui.geometry.Offset(width * if (leftward) -0.05f else 0.05f, 0f)) }
             compose.mainClock.advanceTimeBy(16)
         }
         shot("${name}_1_drag")
@@ -287,6 +307,10 @@ class ScreenshotTest {
         shot("${name}_3b_settle")
         compose.mainClock.advanceTimeBy(160)
         shot("${name}_3c_settle")
+        compose.mainClock.advanceTimeBy(300)
+        shot("${name}_3d_settle")
+        compose.mainClock.advanceTimeBy(300)
+        shot("${name}_3e_settle")
         compose.mainClock.autoAdvance = true
         compose.waitForIdle()
         shot("${name}_4_done")
@@ -300,6 +324,14 @@ class ScreenshotTest {
 
     @Test
     fun swipeFramesBook() = swipeFrames(SwipeStyle.Book, "frames_book")
+
+    /** Взялись за нижний угол и тянем влево — загибается именно нижний угол. */
+    @Test
+    fun swipeFramesBookCorner() = swipeFrames(SwipeStyle.Book, "frames_book_corner", grabAt = 0.92f, leftward = true)
+
+    /** Взялись за верх — загибается верхний угол. */
+    @Test
+    fun swipeFramesBookTop() = swipeFrames(SwipeStyle.Book, "frames_book_top", grabAt = 0.08f)
 
     @Test
     fun emptyDayDark() {

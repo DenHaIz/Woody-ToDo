@@ -3,6 +3,7 @@ package com.woody.planner.data
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +24,7 @@ enum class AppLanguage(val title: String, val locale: Locale) {
 enum class SwipeStyle(private val titleRu: String, private val titleEn: String, private val descriptionRu: String, private val descriptionEn: String) {
     Classic("Классика", "Classic", "Подложка проявляется под карточкой", "The action shows up under the card"),
     Liquid("Капля", "Drop", "Из края тянется капля воды и лопается", "A water drop stretches out and pops"),
-    Book("Книжка", "Book", "Карточка перелистывается, как страница", "The card turns like a page");
+    Book("Книжка", "Book", "Страница загибается за тот край, за который тянете", "The page curls from where you pull it");
 
     fun title(lang: AppLanguage) = lang.pick(titleRu, titleEn)
     fun description(lang: AppLanguage) = lang.pick(descriptionRu, descriptionEn)
@@ -38,6 +39,7 @@ class SettingsRepository(private val context: Context) {
     private val recentCategoriesKey = stringPreferencesKey("recent_categories")
     private val languageKey = stringPreferencesKey("language")
     private val alarmClockKey = booleanPreferencesKey("alarm_clock_reminders")
+    private val missedNudgeKey = intPreferencesKey("missed_nudge_minutes")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
         prefs[themeKey]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System
@@ -56,6 +58,16 @@ class SettingsRepository(private val context: Context) {
      * режим сна и не отменяют «оптимизаторы» прошивок, но в строке состояния виден значок будильника.
      */
     val alarmClockReminders: Flow<Boolean> = context.dataStore.data.map { it[alarmClockKey] ?: true }
+
+    /**
+     * Через сколько минут после времени задачи напомнить, если она ещё не выполнена; 0 — выключено
+     * (по умолчанию). Работает только для задач со временем.
+     */
+    val missedNudgeMinutes: Flow<Int> = context.dataStore.data.map { it[missedNudgeKey] ?: 0 }
+
+    suspend fun setMissedNudgeMinutes(minutes: Int) {
+        context.dataStore.edit { it[missedNudgeKey] = minutes }
+    }
 
     /** Пользователь уже открывал меню кнопки «+» — подсказку больше не показываем. */
     val menuHintSeen: Flow<Boolean> = context.dataStore.data.map { it[menuHintKey] ?: false }

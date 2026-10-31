@@ -6,6 +6,9 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -51,6 +54,10 @@ import com.woody.planner.ui.theme.WoodyTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
+/** Сворачивание листа: около 0,4 с — немного короче раскрытия, с разгоном к концу. */
+private const val SheetExitMs = 400
+private val SheetExitEasing = CubicBezierEasing(0.35f, 0f, 0.65f, 1f)
+
 /**
  * Стеклянный лист поверх экрана. Появляется, «вырастая» снизу справа (от кнопки +),
  * закрывается свайпом вниз, тапом по фону или жестом «назад» с предпросмотром.
@@ -62,7 +69,7 @@ fun GlassSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = WoodyTheme.colors
-    AnimatedVisibility(visible, enter = fadeIn(Motion.snappy()), exit = fadeOut(Motion.snappy())) {
+    AnimatedVisibility(visible, enter = fadeIn(Motion.snappy()), exit = fadeOut(tween(SheetExitMs))) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -77,7 +84,9 @@ fun GlassSheet(
         enter = slideInVertically(Motion.soft()) { it / 3 } +
             scaleIn(Motion.soft(), initialScale = 0.82f, transformOrigin = TransformOrigin(0.85f, 1f)) +
             fadeIn(Motion.snappy()),
-        exit = slideOutVertically(Motion.soft()) { it } + fadeOut(Motion.snappy()),
+        exit = slideOutVertically(tween(SheetExitMs, easing = SheetExitEasing)) { it } +
+            scaleOut(tween(SheetExitMs, easing = SheetExitEasing), targetScale = 0.9f, transformOrigin = TransformOrigin(0.85f, 1f)) +
+            fadeOut(tween(SheetExitMs - 120, delayMillis = 120)),
     ) {
         // Сдвиг листа вниз пальцем; анимация — только при отпускании.
         var drag by remember { mutableFloatStateOf(0f) }

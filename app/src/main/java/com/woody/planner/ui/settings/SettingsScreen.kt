@@ -281,6 +281,16 @@ private fun SettingsContent(
     val batteryUnrestricted = remember(lifecycleState) { OemPower.isBatteryUnrestricted(context) }
     val autostart = remember(lifecycleState) { OemPower.autostartAllowed(context) }
     val alarmClock by container.settings.alarmClockReminders.collectAsStateWithLifecycle(true)
+    val missedNudge by container.settings.missedNudgeMinutes.collectAsStateWithLifecycle(0)
+    // Последний выбранный интервал — чтобы при повторном включении вернулся он, а не значение по умолчанию.
+    var nudgeChoice by rememberSaveable { mutableIntStateOf(NudgeOptions[1]) }
+    LaunchedEffect(missedNudge) { if (missedNudge > 0) nudgeChoice = missedNudge }
+    val setNudge: (Int) -> Unit = { minutes ->
+        scope.launch {
+            container.settings.setMissedNudgeMinutes(minutes)
+            container.reminders.rescheduleAll()
+        }
+    }
     val lang = LocalLanguage.current
     // Обратный отсчёт пробного напоминания; 0 — не отправлено.
     var testLeft by remember { mutableIntStateOf(0) }
@@ -459,6 +469,41 @@ private fun SettingsContent(
                         }
                     },
                 )
+                Spacer(Modifier.height(12.dp))
+                ToggleRow(
+                    title = tr("Если не выполнено", "If not done"),
+                    status = if (missedNudge > 0) {
+                        tr("Напомню через $missedNudge мин после времени задачи", "I'll nudge you $missedNudge min after the task time")
+                    } else {
+                        tr("Напомнить, если задачу со временем не отметили", "Nudge if a timed task isn't checked off")
+                    },
+                    checked = missedNudge > 0,
+                    onChange = { enabled -> setNudge(if (enabled) nudgeChoice else 0) },
+                )
+                AnimatedVisibility(
+                    visible = missedNudge > 0,
+                    enter = expandVertically(Motion.soft()) + fadeIn(Motion.snappy()),
+                    exit = shrinkVertically(Motion.soft()) + fadeOut(Motion.snappy()),
+                ) {
+                    LiquidSegmented(
+                        count = NudgeOptions.size,
+                        selectedIndex = NudgeOptions.indexOf(nudgeChoice).coerceAtLeast(0),
+                        onSelect = { index -> setNudge(NudgeOptions[index]) },
+                        pillColor = colors.accent,
+                        modifier = Modifier
+                            .padding(top = 10.dp, start = 22.dp)
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(Shapes.Pill)
+                            .background(colors.chip),
+                    ) { index, selected ->
+                        FitText(
+                            tr("через ${NudgeOptions[index]} мин", "after ${NudgeOptions[index]} min"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) Color.White else colors.textPrimary,
+                        )
+                    }
+                }
                 if (OemPower.needsAutostart) {
                     // Xiaomi, Huawei, Oppo, Vivo: без автозапуска закрытое приложение не получает будильники.
                     Spacer(Modifier.height(12.dp))
@@ -673,6 +718,9 @@ private fun SettingsCard(
         }
     }
 }
+
+/** Варианты задержки для напоминания о невыполненной задаче, минуты. */
+private val NudgeOptions = listOf(15, 30, 60)
 
 /** Сколько недавно изменённых категорий видно в свёрнутом списке. */
 private const val RecentCount = 3

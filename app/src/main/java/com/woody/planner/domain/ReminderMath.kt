@@ -28,4 +28,13 @@ object ReminderMath {
         }
         return null
     }
+
+    /**
+     * Ближайшая проверка «не выполнено»: через [delayMin] минут после времени задачи.
+     * Только для задач со временем — у задач «на весь день» нет момента, после которого они просрочены.
+     */
+    fun nextMissedCheck(task: Task, delayMin: Int, now: LocalDateTime, isHandled: (LocalDate) -> Boolean): ReminderTrigger? {
+        if (delayMin <= 0 || task.time == null) return null
+        return nextTrigger(task.copy(reminderOffsetMin = -delayMin), now, isHandled)
+    }
 }

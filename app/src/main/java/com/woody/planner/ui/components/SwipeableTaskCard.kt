@@ -2,6 +2,7 @@ package com.woody.planner.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
@@ -42,7 +43,15 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -63,6 +72,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sign
 import kotlin.math.sin
@@ -81,13 +91,18 @@ data class SwipeAction(
 
 private val CardShape = RoundedCornerShape(24.dp)
 
-/** Доля ширины, на которой страница «Книжки» встаёт ребром (90°). */
-private const val BookTurnFraction = 0.6f
+/** «Книжка»: на сколько ширин карточки нужно протянуть, чтобы страница перевернулась целиком. */
+private const val BookFullTurn = 2.3f
+
+/** Страница «Книжки» перелистывается и ложится обратно плавно, без отскока. */
+private val PageEasing = CubicBezierEasing(0.3f, 0f, 0.2f, 1f)
+private val BookReturn = spring<Float>(dampingRatio = 1f, stiffness = 240f)
 
 /**
  * Карточка со свайпами в обе стороны. Жест общий, отрисовка зависит от [style]:
  * «Классика» — подложка под уезжающей карточкой; «Капля» — из края карточки вытягивается
- * прозрачная капля воды и отрывается на пороге; «Книжка» — карточка перелистывается, как страница.
+ * прозрачная капля воды и отрывается на пороге; «Книжка» — карточка загибается и перелистывается,
+ * как страница, от того места, за которое её потянули (верх, середина или низ края).
  * [previewOffset] фиксирует сдвиг (доля порога) — для превью и скриншотов.
  */
 @Composable
@@ -105,12 +120,21 @@ fun SwipeableTaskCard(
     val haptics = LocalHapticFeedback.current
     val start by rememberUpdatedState(startAction)
     val end by rememberUpdatedState(endAction)
-    val underlay = WoodyTheme.colors.background
+    val colors = WoodyTheme.colors
+    // Оборот страницы — плотная бумага цвета карточки.
+    val paper = colors.card.compositeOver(colors.background)
+    val paperEdge = colors.cardBorder
+    val pageLayer = rememberGraphicsLayer()
 
     var cardSize by remember { mutableStateOf(IntSize.Zero) }
     // Живой сдвиг пальцем — обычное состояние, без корутины на каждое событие.
     var drag by remember { mutableFloatStateOf(0f) }
     val offset = { previewOffset?.let { it * threshold } ?: drag }
+    // Высота, на которой взялись за карточку: от неё зависит, какой угол загибается в «Книжке».
+    var grabY by remember { mutableFloatStateOf(Float.NaN) }
+    val grab = { if (grabY.isNaN()) cardSize.height * 0.72f else grabY }
+    // У «Книжки» порог длиннее: страница должна заметно загнуться, прежде чем перевернуться.
+    val activeThreshold = if (style == SwipeStyle.Book && cardSize.width > 0) max(threshold, cardSize.width * 0.32f) else threshold
 
     // Действие, зафиксированное в момент отпускания. Пока карточка возвращается, подложка и иконка
     // не меняются, даже если у задачи уже сменились действия («Готово» → «Вернуть», «Удалить»).
@@ -165,7 +189,7 @@ fun SwipeableTaskCard(
                     val v = offset()
                     if (v == 0f) return@drawBehind
                     val action = locked ?: (if (v > 0) start else end) ?: return@drawBehind
-                    val p = (abs(v) / threshold).coerceIn(0f, 1.5f)
+                    val p = (abs(v) / activeThreshold).coerceIn(0f, 1.5f)
                     when (style) {
                         SwipeStyle.Classic -> drawOutsideCard(v) {
                             drawRoundRect(
@@ -177,13 +201,13 @@ fun SwipeableTaskCard(
                         SwipeStyle.Liquid -> if (locked == null || locked?.dismiss == true) {
                             drawOutsideCard(v) { drawWaterDrop(v, p, action.color, wobble.value) }
                         }
-                        SwipeStyle.Book -> drawBookBackdrop(v, p, action.color)
+                        SwipeStyle.Book -> pageFold(v, grab(), size)?.let { drawBookBackdrop(it, p, action.color) }
                     }
                 },
         ) {
             val released = { locked != null && locked?.dismiss == false }
-            startShown?.let { ActionHint(it, style, threshold, Side.Start, released) { offset() } }
-            endShown?.let { ActionHint(it, style, threshold, Side.End, released) { offset() } }
+            startShown?.let { ActionHint(it, style, activeThreshold, Side.Start, released) { offset() } }
+            endShown?.let { ActionHint(it, style, activeThreshold, Side.End, released) { offset() } }
         }
 
         Box(
@@ -197,60 +221,58 @@ fun SwipeableTaskCard(
                             // Карточка чуть «сплющивается», будто её держит поверхностное натяжение.
                             scaleY = 1f - 0.02f * (abs(v) / threshold).coerceIn(0f, 1f)
                         }
-                        SwipeStyle.Book -> {
-                            // Петля — у дальнего края: тянем вправо — лист переворачивается вокруг правого края.
-                            val turn = bookTurn(v, size.width)
-                            transformOrigin = TransformOrigin(if (v >= 0) 1f else 0f, 0.5f)
-                            cameraDistance = 24f * density.density
-                            rotationY = if (v >= 0) turn * 90f else -turn * 90f
-                        }
+                        // «Книжка» не двигает карточку целиком — страница загибается при отрисовке.
+                        SwipeStyle.Book -> Unit
                     }
                 }
                 .drawWithContent {
-                    val v = offset()
-                    if (style == SwipeStyle.Book && v != 0f) {
-                        val turn = bookTurn(v, size.width)
-                        // Плотная подложка, чтобы при повороте сквозь карточку не просвечивал цвет действия.
-                        drawRoundRect(underlay.copy(alpha = (turn * 6f).coerceIn(0f, 1f)), cornerRadius = CornerRadius(24.dp.toPx()))
+                    val fold = if (style == SwipeStyle.Book) pageFold(offset(), grab(), size) else null
+                    if (fold == null) {
                         drawContent()
-                        // Тень сгиба: темнее у свободного края страницы.
-                        val freeEdgeAtStart = v > 0
-                        drawRoundRect(
-                            brush = Brush.horizontalGradient(
-                                colors = if (freeEdgeAtStart) {
-                                    listOf(Color.Black.copy(alpha = 0.16f * turn), Color.Transparent)
-                                } else {
-                                    listOf(Color.Transparent, Color.Black.copy(alpha = 0.16f * turn))
-                                },
-                            ),
-                            cornerRadius = CornerRadius(24.dp.toPx()),
-                        )
                     } else {
-                        drawContent()
+                        pageLayer.record { this@drawWithContent.drawContent() }
+                        drawPageTurn(pageLayer, fold, paper, paperEdge)
                     }
                 }
                 .pointerInput(style) {
                     if (previewOffset != null) return@pointerInput
                     var armed = false
                     detectHorizontalDragGestures(
-                        onDragStart = {
+                        onDragStart = { at ->
                             settleJob?.cancel()
                             locked = null
                             lockedSide = 0
                             armed = false
+                            // Новый захват — новый угол, но только если страница уже лежит ровно.
+                            if (drag == 0f) grabY = at.y
                         },
                         onDragEnd = {
                             val v = drag
                             val action = if (v > 0) start else end
-                            if (action == null || abs(v) < threshold) {
-                                settleTo(0f, Motion.bouncy())
+                            if (action == null || abs(v) < activeThreshold) {
+                                settleTo(0f, if (style == SwipeStyle.Book) BookReturn else Motion.bouncy())
                                 return@detectHorizontalDragGestures
                             }
                             val direction = sign(v)
                             locked = action
                             lockedSide = direction.toInt()
+                            if (style == SwipeStyle.Book) {
+                                // Страница переворачивается до конца, действие срабатывает, и (если задача
+                                // остаётся в списке) страница так же плавно ложится обратно — уже в новом виде.
+                                val full = direction * cardSize.width * BookFullTurn
+                                settleTo(full, tween(520, easing = PageEasing)) {
+                                    action.onTrigger()
+                                    if (action.dismiss) {
+                                        delay(600)
+                                        drag = 0f
+                                    } else {
+                                        animate(drag, 0f, animationSpec = tween(620, easing = PageEasing)) { value, _ -> drag = value }
+                                    }
+                                }
+                                return@detectHorizontalDragGestures
+                            }
                             if (action.dismiss) {
-                                val target = direction * cardSize.width * if (style == SwipeStyle.Book) BookTurnFraction else 1f
+                                val target = direction * cardSize.width
                                 settleTo(target, Motion.snappy()) {
                                     action.onTrigger()
                                     // Если элемент остался в списке (например, после отмены) — вернём его на место.
@@ -269,29 +291,28 @@ fun SwipeableTaskCard(
                                     }
                                 }
                                 action.onTrigger()
-                                // «Книжка» мягко ложится обратно почти без отскока, остальные — пружиной.
-                                val spec = if (style == SwipeStyle.Book) spring<Float>(dampingRatio = 0.7f, stiffness = 420f) else Motion.bouncy()
-                                settleTo(0f, spec)
+                                settleTo(0f, Motion.bouncy())
                             }
                         },
-                        onDragCancel = { settleTo(0f, Motion.bouncy()) },
+                        onDragCancel = { settleTo(0f, if (style == SwipeStyle.Book) BookReturn else Motion.bouncy()) },
                     ) { change, dragAmount ->
                         change.consume()
                         val current = drag
                         val available = if (current + dragAmount > 0) start else end
-                        // Без действия в эту сторону — тугая резина; за порогом — мягкое сопротивление.
+                        // Без действия в эту сторону — тугая резина; за порогом — мягкое сопротивление
+                        // (страница «Книжки» идёт за пальцем без сопротивления).
                         val resistance = when {
                             available == null -> 0.15f
+                            style == SwipeStyle.Book -> 1f
                             abs(current) > threshold -> 0.35f
                             else -> 1f
                         }
                         var next = current + dragAmount * resistance
-                        // Страница не переворачивается дальше, чем «ребром».
                         if (style == SwipeStyle.Book) {
-                            val limit = cardSize.width * BookTurnFraction * 0.92f
+                            val limit = cardSize.width * BookFullTurn * 0.85f
                             next = next.coerceIn(-limit, limit)
                         }
-                        val nowArmed = available != null && abs(next) >= threshold
+                        val nowArmed = available != null && abs(next) >= activeThreshold
                         if (nowArmed != armed) {
                             armed = nowArmed
                             haptics.performHapticFeedback(
@@ -314,9 +335,6 @@ fun SwipeableTaskCard(
     }
 }
 
-/** Доля переворота страницы 0..1 (1 — ребром). */
-private fun bookTurn(v: Float, width: Float): Float =
-    (abs(v) / (width.coerceAtLeast(1f) * BookTurnFraction)).coerceIn(0f, 1f)
 
 /** Радиус капли: вписывается в зазор между краем и карточкой, но не больше трети высоты. */
 private fun Density.dropRadius(gap: Float, height: Float): Float =
@@ -526,22 +544,134 @@ private fun DrawScope.drawSplash(t: Float, color: Color, cx: Float, r0: Float) {
     }
 }
 
-/** Подложка «Книжки»: цвет действия с мягкой тенью от поднимающейся страницы у петли. */
-private fun DrawScope.drawBookBackdrop(v: Float, p: Float, color: Color) {
-    val turn = bookTurn(v, size.width)
-    // Около нуля цвет почти прозрачный — страница ложится без цветной вспышки.
-    drawRoundRect(color.copy(alpha = (p * 1.3f).coerceAtMost(1f)), cornerRadius = CornerRadius(24.dp.toPx()))
-    val hingeAtEnd = v > 0
-    val shadowWidth = size.width * 0.35f
-    drawRect(
-        brush = Brush.horizontalGradient(
-            colors = if (hingeAtEnd) {
-                listOf(Color.Transparent, Color.Black.copy(alpha = 0.14f * turn))
-            } else {
-                listOf(Color.Black.copy(alpha = 0.14f * turn), Color.Transparent)
-            },
-            startX = if (hingeAtEnd) size.width - shadowWidth else 0f,
-            endX = if (hingeAtEnd) size.width else shadowWidth,
-        ),
-    )
+/**
+ * Линия сгиба страницы. Палец тянет точку свободного края (на высоте захвата) — сгиб проходит
+ * посередине между исходным и текущим положением этой точки, перпендикулярно направлению.
+ * Взялись за верх или низ — точка ещё и смещается к середине, и загибается угол;
+ * за середину — страница переворачивается ровно. [normal] смотрит в сторону поднятой части.
+ */
+private class PageFold(val mid: Offset, val normal: Offset, val lifted: Float)
+
+private fun pageFold(v: Float, grabY: Float, size: Size): PageFold? {
+    if (abs(v) < 0.5f || size.width <= 0f) return null
+    val gx = if (v > 0) 0f else size.width
+    val gy = grabY.coerceIn(0f, size.height)
+    val lift = (size.height / 2f - gy) * 0.8f * smoothstep(0f, size.width * 0.9f, abs(v))
+    val from = Offset(gx, gy)
+    val to = Offset(gx + v, gy + lift)
+    val d = from - to
+    val length = d.getDistance()
+    if (length < 0.5f) return null
+    return PageFold(mid = (from + to) / 2f, normal = d / length, lifted = abs(v) / (size.width * BookFullTurn))
+}
+
+/** Полуплоскость по одну сторону сгиба ([side] = 1 — поднятая часть, -1 — лежащая). */
+private fun DrawScope.halfPlane(fold: PageFold, side: Float): Path {
+    val n = fold.normal * side
+    val along = Offset(-n.y, n.x)
+    val extent = (size.width + size.height) * 4f
+    val a = fold.mid + along * extent
+    val b = fold.mid - along * extent
+    return Path().apply {
+        moveTo(a.x, a.y)
+        lineTo(b.x, b.y)
+        lineTo(b.x + n.x * extent, b.y + n.y * extent)
+        lineTo(a.x + n.x * extent, a.y + n.y * extent)
+        close()
+    }
+}
+
+/** Отражение относительно линии сгиба: так поднятая часть страницы ложится на другую сторону. */
+private fun reflection(fold: PageFold): Matrix {
+    val n = fold.normal
+    val k = 2f * (fold.mid.x * n.x + fold.mid.y * n.y)
+    return Matrix().apply {
+        values[Matrix.ScaleX] = 1f - 2f * n.x * n.x
+        values[Matrix.SkewX] = -2f * n.x * n.y
+        values[Matrix.SkewY] = -2f * n.x * n.y
+        values[Matrix.ScaleY] = 1f - 2f * n.y * n.y
+        values[Matrix.TranslateX] = k * n.x
+        values[Matrix.TranslateY] = k * n.y
+    }
+}
+
+private fun DrawScope.cardPath(): Path =
+    Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(24.dp.toPx()))) }
+
+/**
+ * Страница «Книжки»: лежащая часть карточки, тень от загиба и оборот загнутой части —
+ * плотная бумага, сквозь которую чуть просвечивает зеркальный текст, со световым бликом у сгиба.
+ */
+private fun DrawScope.drawPageTurn(layer: GraphicsLayer, fold: PageFold, paper: Color, edge: Color) {
+    val card = cardPath()
+    val flat = halfPlane(fold, -1f)
+    val lifted = halfPlane(fold, 1f)
+    // Ближе к полному перевороту оборот тает — страница «уходит».
+    val presence = 1f - smoothstep(0.7f, 0.98f, fold.lifted)
+    val n = fold.normal
+
+    clipPath(flat) { drawLayer(layer) }
+    // Тень, которую загнутая страница отбрасывает на лежащую часть.
+    clipPath(card) {
+        clipPath(flat) {
+            val reach = 26.dp.toPx()
+            drawRect(
+                Brush.linearGradient(
+                    0f to Color.Black.copy(alpha = 0.2f * presence),
+                    1f to Color.Transparent,
+                    start = fold.mid,
+                    end = fold.mid - n * reach,
+                ),
+            )
+        }
+    }
+    if (presence <= 0.01f) return
+
+    drawIntoCanvas { canvas ->
+        canvas.saveLayer(
+            androidx.compose.ui.geometry.Rect(-size.width * 3f, -size.height * 3f, size.width * 4f, size.height * 4f),
+            Paint().apply { alpha = presence },
+        )
+        withTransform({ transform(reflection(fold)) }) {
+            clipPath(card) {
+                clipPath(lifted) {
+                    // Зеркальный текст с обратной стороны, почти скрытый плотной бумагой.
+                    drawLayer(layer)
+                    drawRect(paper.copy(alpha = 0.9f))
+                    // Свет: блик у сгиба, к краю страница уходит в лёгкую тень.
+                    val span = (size.width * 0.7f).coerceAtLeast(1f)
+                    drawRect(
+                        Brush.linearGradient(
+                            0f to Color.White.copy(alpha = 0.32f),
+                            0.25f to Color.White.copy(alpha = 0f),
+                            1f to Color.Black.copy(alpha = 0.1f),
+                            start = fold.mid,
+                            end = fold.mid + n * span,
+                        ),
+                    )
+                }
+                // Кромка листа.
+                clipPath(lifted) { drawPath(card, edge, style = Stroke(1.dp.toPx())) }
+            }
+        }
+        canvas.restore()
+    }
+}
+
+/** Подложка «Книжки»: цвет действия там, где страница поднялась, и мягкая тень у сгиба. */
+private fun DrawScope.drawBookBackdrop(fold: PageFold, p: Float, color: Color) {
+    val card = cardPath()
+    clipPath(card) {
+        clipPath(halfPlane(fold, 1f)) {
+            drawRect(color.copy(alpha = (0.35f + 0.65f * p).coerceAtMost(1f)))
+            drawRect(
+                Brush.linearGradient(
+                    0f to Color.Black.copy(alpha = 0.18f),
+                    1f to Color.Transparent,
+                    start = fold.mid,
+                    end = fold.mid + fold.normal * 30.dp.toPx(),
+                ),
+            )
+        }
+    }
 }
