@@ -97,6 +97,8 @@ import com.woody.planner.data.ThemeMode
 import com.woody.planner.domain.Category
 import com.woody.planner.reminders.Notifications
 import com.woody.planner.reminders.OemPower
+import com.woody.planner.ui.editor.ReminderOptions
+import com.woody.planner.ui.editor.reminderLabel
 import com.woody.planner.widget.WidgetUpdater
 import com.woody.planner.ui.categories.CategoriesViewModel
 import com.woody.planner.ui.categories.CategoryEditorSheet
@@ -284,6 +286,14 @@ private fun SettingsContent(
     val autostart = remember(lifecycleState) { OemPower.autostartAllowed(context) }
     val alarmClock by container.settings.alarmClockReminders.collectAsStateWithLifecycle(true)
     val missedNudge by container.settings.missedNudgeMinutes.collectAsStateWithLifecycle(0)
+    val defaultReminder by container.settings.defaultReminderMinutes.collectAsStateWithLifecycle(null)
+    // Как и у «Если не выполнено»: при повторном включении возвращается последний выбор.
+    var reminderChoice by rememberSaveable { mutableIntStateOf(ReminderOptions[1]) }
+    LaunchedEffect(defaultReminder) { defaultReminder?.let { reminderChoice = it } }
+    val setDefaultReminder: (Int?) -> Unit = { minutes ->
+        scope.launch { container.settings.setDefaultReminderMinutes(minutes) }
+        if (minutes != null && !notificationsAllowed) onRequestNotifications()
+    }
     // Последний выбранный интервал — чтобы при повторном включении вернулся он, а не значение по умолчанию.
     var nudgeChoice by rememberSaveable { mutableIntStateOf(NudgeOptions[1]) }
     LaunchedEffect(missedNudge) { if (missedNudge > 0) nudgeChoice = missedNudge }
@@ -485,6 +495,41 @@ private fun SettingsContent(
                         )
                     },
                 )
+                Spacer(Modifier.height(12.dp))
+                ToggleRow(
+                    title = tr("Для новых задач", "For new tasks"),
+                    status = defaultReminder?.let {
+                        tr("Задачам со временем: ", "Timed tasks: ") + reminderLabel(it, lang).lowercase(lang.locale)
+                    } ?: tr("Сразу включать напоминание задачам со временем", "Turn the reminder on for new timed tasks"),
+                    checked = defaultReminder != null,
+                    onChange = { enabled -> setDefaultReminder(if (enabled) reminderChoice else null) },
+                )
+                AnimatedVisibility(
+                    visible = defaultReminder != null,
+                    enter = expandVertically(Motion.soft()) + fadeIn(Motion.snappy()),
+                    exit = shrinkVertically(Motion.soft()) + fadeOut(Motion.snappy()),
+                ) {
+                    LiquidSegmented(
+                        count = ReminderOptions.size,
+                        selectedIndex = ReminderOptions.indexOf(reminderChoice).coerceAtLeast(0),
+                        onSelect = { index -> setDefaultReminder(ReminderOptions[index]) },
+                        pillColor = colors.accent,
+                        modifier = Modifier
+                            .padding(top = 10.dp, start = 22.dp)
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .clip(Shapes.Pill)
+                            .background(colors.chip),
+                    ) { index, selected ->
+                        val minutes = ReminderOptions[index]
+                        FitText(
+                            // По-английски «… before» не помещается в четыре сегмента — короткие подписи.
+                            lang.pick(reminderLabel(minutes, lang), if (minutes == 0) "On time" else if (minutes == 60) "1 hour" else "$minutes min"),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selected) colors.onAccent else colors.textPrimary,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
                 ToggleRow(
                     title = tr("Как будильник", "As an alarm"),

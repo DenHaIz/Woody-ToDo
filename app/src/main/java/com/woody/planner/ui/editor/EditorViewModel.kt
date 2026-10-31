@@ -32,11 +32,14 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
 
     val canScheduleExact: Boolean get() = container.reminders.canScheduleExact
 
+    private val defaultReminder: StateFlow<Int?> =
+        container.settings.defaultReminderMinutes.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     fun openNew(day: LocalDate) {
         // Повторное нажатие «+» при открытом редакторе не стирает набранное.
         if (_draft.value != null) return
         _session.value++
-        _draft.value = TaskDraft(date = day)
+        _draft.value = TaskDraft(date = day, defaultReminder = defaultReminder.value)
     }
 
     fun openEdit(taskId: Long) = viewModelScope.launch {

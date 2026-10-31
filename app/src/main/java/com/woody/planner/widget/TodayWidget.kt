@@ -13,13 +13,10 @@ import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
-import androidx.glance.action.ActionParameters
-import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.action.ActionCallback
-import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.action.actionSendBroadcast
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.appWidgetBackground
 import androidx.glance.appwidget.cornerRadius
@@ -60,10 +57,11 @@ import java.time.format.DateTimeFormatter
  * Виджет «Сегодня». В одну строку (5×1, как раз под поисковую строку) — счётчик дня, ближайшая
  * задача с кружком «готово» и «+». Если растянуть выше — список задач дня с галочками.
  * Обновляется только когда меняются задачи и раз в сутки после полуночи — без периодической работы.
+ * Рисует его [WidgetUpdater] под точный размер на рабочем столе (Glance здесь — только разметка).
  */
 class TodayWidget : GlanceAppWidget() {
 
-    override val sizeMode = SizeMode.Responsive(setOf(OneRow, Tall))
+    override val sizeMode: SizeMode = SizeMode.Exact
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val container = (context.applicationContext as WoodyApp).container
@@ -277,12 +275,14 @@ private fun Counter(data: WidgetData, palette: WidgetPalette) {
 /** Кружок-галочка: нажатие отмечает задачу прямо с рабочего стола. */
 @Composable
 private fun CheckCircle(item: TaskItem, palette: WidgetPalette) {
-    val toggle = actionRunCallback<ToggleTaskAction>(
-        actionParametersOf(
-            ToggleTaskAction.TaskId to item.taskId,
-            ToggleTaskAction.Day to item.day.toEpochDay(),
-            ToggleTaskAction.Done to !item.done,
-        ),
+    val toggle = actionSendBroadcast(
+        Intent(WidgetUpdater.ACTION_TOGGLE)
+            .setClassName("com.woody.planner", TodayWidgetReceiver::class.java.name)
+            .putExtra(WidgetUpdater.EXTRA_TASK_ID, item.taskId)
+            .putExtra(WidgetUpdater.EXTRA_DAY, item.day.toEpochDay())
+            .putExtra(WidgetUpdater.EXTRA_DONE, !item.done)
+            // Свои данные у каждой задачи — чтобы система не склеила кружки в один PendingIntent.
+            .setData("woody://widget/toggle/${item.taskId}/${item.day.toEpochDay()}/${!item.done}".toUri()),
     )
     Box(
         GlanceModifier.size(30.dp).clickable(toggle),
@@ -356,20 +356,3 @@ private fun openApp(day: LocalDate, newTask: Boolean): Intent =
         .putExtra(MainActivity.EXTRA_NEW_TASK, newTask)
         // Разные данные — чтобы система не склеила два PendingIntent («открыть» и «+») в один.
         .setData("woody://widget/${if (newTask) "new" else "open"}".toUri())
-
-/** Отметка задачи из виджета: запись в базу, виджет обновится сам (через [WidgetUpdater]). */
-class ToggleTaskAction : ActionCallback {
-    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val taskId = parameters[TaskId] ?: return
-        val day = parameters[Day]?.let(LocalDate::ofEpochDay) ?: return
-        val done = parameters[Done] ?: return
-        (context.applicationContext as WoodyApp).container.repository.setDone(taskId, day, done)
-        TodayWidget().update(context, glanceId)
-    }
-
-    companion object {
-        val TaskId = ActionParameters.Key<Long>("task_id")
-        val Day = ActionParameters.Key<Long>("epoch_day")
-        val Done = ActionParameters.Key<Boolean>("done")
-    }
-}

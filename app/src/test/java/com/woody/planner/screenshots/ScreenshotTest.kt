@@ -189,6 +189,18 @@ class ScreenshotTest {
     }
 
     @Test
+    fun settingsDefaultReminder() {
+        seed()
+        runBlocking { container.settings.setDefaultReminderMinutes(10) }
+        render(dark = false)
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        compose.onNodeWithText("Как будильник").performScrollTo()
+        compose.waitForIdle()
+        shot("settings_default_reminder")
+    }
+
+    @Test
     fun english() {
         seed()
         render(dark = false, lang = AppLanguage.English)
@@ -208,6 +220,7 @@ class ScreenshotTest {
         compose.onNodeWithContentDescription("Add").performTouchInput { longClick() }
         compose.waitForIdle()
         shot("en_settings")
+        runBlocking { container.settings.setDefaultReminderMinutes(60) }
         compose.onNodeWithText("Drop").performClick()
         compose.onNodeWithText("Test a reminder").performScrollTo()
         compose.waitForIdle()

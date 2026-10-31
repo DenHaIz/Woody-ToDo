@@ -33,8 +33,16 @@ data class TaskDraft(
     val subtasks: List<DraftSubtask> = emptyList(),
     val createdAt: Long = 0,
     val sortOrder: Int = 0,
+    /**
+     * Напоминание из настройки «Для новых задач»: включается, как только у задачи появилось время,
+     * и забывается, если напоминание выбрали вручную.
+     */
+    val defaultReminder: Int? = null,
 ) {
     val isNew: Boolean get() = id == 0L
+
+    /** Напоминание, которое будет сохранено: выбранное вручную или по умолчанию (только для задач со временем). */
+    val effectiveReminder: Int? get() = reminderOffsetMin ?: defaultReminder?.takeIf { time != null }
 }
 
 /** [key] — стабильный ключ для анимаций списка, [id] = 0 для новых пунктов. */
@@ -212,7 +220,7 @@ class TaskRepository(
             categoryId = draft.categoryId,
             startDate = draft.date,
             time = draft.time,
-            reminderOffsetMin = draft.reminderOffsetMin,
+            reminderOffsetMin = draft.effectiveReminder,
             recurrence = draft.recurrence,
             createdAt = if (isNew) System.currentTimeMillis() else draft.createdAt,
             sortOrder = if (isNew) tasks.maxSortOrder() + 1 else draft.sortOrder,

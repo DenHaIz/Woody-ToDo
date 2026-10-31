@@ -121,9 +121,9 @@ import java.time.format.TextStyle as JTextStyle
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 /** За сколько минут до задачи напомнить. */
-private val ReminderOptions = listOf(0, 10, 30, 60)
+internal val ReminderOptions = listOf(0, 10, 30, 60)
 
-private fun reminderLabel(minutes: Int, lang: AppLanguage): String = when (minutes) {
+internal fun reminderLabel(minutes: Int, lang: AppLanguage): String = when (minutes) {
     0 -> lang.pick("В момент", "On time")
     60 -> lang.pick("За час", "1 h before")
     else -> lang.pick("За $minutes мин", "$minutes min before")
@@ -219,11 +219,12 @@ fun TaskEditorSheet(
             Param.Time -> TimePanel(current, update, close)
             Param.Category -> CategoryPanel(current, categories, update, close)
             Param.Reminder -> ReminderPanel(
-                draft = current,
+                // Напоминание по умолчанию показывается как выбранное; ручной выбор его заменяет.
+                draft = current.copy(reminderOffsetMin = current.effectiveReminder),
                 today = today,
                 onChange = {
-                    if (current.reminderOffsetMin == null && it.reminderOffsetMin != null) onReminderEnabled()
-                    update(it)
+                    if (current.effectiveReminder == null && it.reminderOffsetMin != null) onReminderEnabled()
+                    update(it.copy(defaultReminder = null))
                 },
                 onPickTime = { param = Param.Time },
                 onClose = close,
@@ -353,8 +354,8 @@ private fun EditorContent(
             TileData(
                 Param.Reminder,
                 WoodyIcons.Bell,
-                draft.reminderOffsetMin?.let { reminderLabel(it, lang) } ?: none,
-                active = draft.reminderOffsetMin != null,
+                draft.effectiveReminder?.let { reminderLabel(it, lang) } ?: none,
+                active = draft.effectiveReminder != null,
             ),
             TileData(Param.Repeat, WoodyIcons.Repeat, recurrenceLabel(draft.recurrence, lang), active = draft.recurrence.isRecurring),
             TileData(

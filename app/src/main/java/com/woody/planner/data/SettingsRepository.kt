@@ -40,6 +40,7 @@ class SettingsRepository(private val context: Context) {
     private val languageKey = stringPreferencesKey("language")
     private val alarmClockKey = booleanPreferencesKey("alarm_clock_reminders")
     private val missedNudgeKey = intPreferencesKey("missed_nudge_minutes")
+    private val defaultReminderKey = intPreferencesKey("default_reminder_minutes")
     private val dynamicColorsKey = booleanPreferencesKey("dynamic_colors")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
@@ -65,6 +66,16 @@ class SettingsRepository(private val context: Context) {
      * (по умолчанию). Работает только для задач со временем.
      */
     val missedNudgeMinutes: Flow<Int> = context.dataStore.data.map { it[missedNudgeKey] ?: 0 }
+
+    /**
+     * Напоминание, которое сразу включается новым задачам со временем: за сколько минут до неё
+     * (0 — в момент). null — выключено (по умолчанию).
+     */
+    val defaultReminderMinutes: Flow<Int?> = context.dataStore.data.map { prefs -> prefs[defaultReminderKey]?.takeIf { it >= 0 } }
+
+    suspend fun setDefaultReminderMinutes(minutes: Int?) {
+        context.dataStore.edit { it[defaultReminderKey] = minutes ?: -1 }
+    }
 
     /** Цвета Material You (из обоев) вместо фирменных цветов Woody. По умолчанию — фирменные. */
     val dynamicColors: Flow<Boolean> = context.dataStore.data.map { it[dynamicColorsKey] ?: false }

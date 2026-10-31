@@ -17,6 +17,7 @@ import com.woody.planner.ui.WoodyAppShell
 import com.woody.planner.ui.i18n.LocalLanguage
 import com.woody.planner.ui.theme.WoodyTheme
 import java.time.LocalDate
+import com.woody.planner.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -45,6 +46,8 @@ class MainActivity : ComponentActivity() {
             // Принудительная остановка (или «очистка» на некоторых прошивках) стирает будильники —
             // при каждом запуске ставим их заново. Это один запрос к базе.
             container.reminders.rescheduleAll()
+            // Виджет на рабочем столе — свежий при каждом запуске (в том числе сразу после обновления).
+            WidgetUpdater.updateNow(this@MainActivity)
         }
         setContent {
             val language by container.settings.language.collectAsStateWithLifecycle(null)

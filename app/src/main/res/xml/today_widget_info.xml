@@ -2,7 +2,7 @@
 <!-- 5×1 — ровно строка под поисковой строкой; можно растянуть вверх до списка задач. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_description"
-    android:initialLayout="@layout/glance_default_loading_layout"
+    android:initialLayout="@layout/widget_initial"
     android:minWidth="250dp"
     android:minHeight="40dp"
     android:minResizeWidth="180dp"

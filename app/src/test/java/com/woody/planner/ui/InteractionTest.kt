@@ -420,6 +420,45 @@ class InteractionTest {
     }
 
     @Test
+    fun defaultReminderGoesToNewTimedTasksOnly() {
+        runBlocking { container.settings.setDefaultReminderMinutes(10) }
+        start()
+        fun add(title: String) {
+            compose.onNodeWithContentDescription("Добавить").performClick()
+            compose.waitForIdle()
+            compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+            compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput(title)
+            compose.waitForIdle()
+            // Пока печатают, плитка напоминания спрятана за «Дополнительно».
+            compose.onNodeWithText("Дополнительно").performClick()
+            compose.waitForIdle()
+        }
+        fun saved(prefix: String) = runBlocking {
+            var task: com.woody.planner.data.TaskEntity? = null
+            repeat(50) {
+                task = container.database.taskDao().observeAll().first().firstOrNull { it.title.startsWith(prefix) }
+                if (task != null) return@repeat
+                Thread.sleep(50)
+            }
+            requireNotNull(task) { "задача не сохранилась" }
+        }
+
+        // Время есть — плитка сразу показывает напоминание, и оно сохраняется.
+        add("Спортзал завтра в 18")
+        compose.onNodeWithText("За 10 мин").assertExists()
+        compose.onNodeWithText("Добавить").performClick()
+        compose.waitForIdle()
+        assertEquals(10, saved("Спортзал").reminderOffsetMin)
+
+        // Без времени напоминание по умолчанию не ставится (иначе каждая такая задача звенела бы в 9:00).
+        add("Хлеб")
+        compose.onNodeWithText("За 10 мин").assertDoesNotExist()
+        compose.onNodeWithText("Добавить").performClick()
+        compose.waitForIdle()
+        assertEquals(null, saved("Хлеб").reminderOffsetMin)
+    }
+
+    @Test
     fun dismissingRecognitionKeepsTitleAsTyped() {
         start()
         compose.onNodeWithContentDescription("Добавить").performClick()
