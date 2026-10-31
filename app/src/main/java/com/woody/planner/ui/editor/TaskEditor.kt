@@ -21,6 +21,13 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.foundation.background
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.AnnotatedString
+import com.woody.planner.domain.QuickInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -163,14 +170,36 @@ fun TaskEditorSheet(
     var origin by remember { mutableStateOf(Offset.Unspecified) }
     if (draft == null && param != null) param = null
 
+    // Ввод обычным языком: «завтра в 18», «по понедельникам». Распознанное не записывается в черновик,
+    // а накладывается поверх, пока фраза есть в названии: стёрли или дописали «в 5ке» — значение ушло.
+    // Фраза подсвечивается и вырезается при сохранении; крестик на подсказке отменяет распознавание.
+    val initialTitle = remember(session) { draft?.title }
+    var dismissedQuick by remember(session) { mutableStateOf<String?>(null) }
+    val base = shown
+    val parsed = remember(base?.title, today) {
+        base?.takeIf { it.title != initialTitle }?.let { QuickInput.parse(it.title, today) }
+    }
+    val quickSignature = base?.let { parsed?.signature(it.title) }
+    val quick = parsed?.takeIf { quickSignature != dismissedQuick }
+    val effective = base?.let { b ->
+        quick?.let { q -> b.copy(date = q.date ?: b.date, time = q.time ?: b.time, recurrence = q.recurrence ?: b.recurrence) } ?: b
+    }
+    // Выбор в окне параметра «закрепляет» распознанное: фраза уходит из названия, значения остаются.
+    val manualChange: (TaskDraft) -> Unit = { changed ->
+        val q = quick
+        if (q != null && base != null) onChange(changed.copy(title = QuickInput.strip(base.title, q.spans))) else onChange(changed)
+    }
+
     GlassSheet(visible = draft != null, onDismiss = onDismiss) {
-        val current = shown ?: return@GlassSheet
+        val current = effective ?: return@GlassSheet
         EditorContent(
             draft = current,
             isNew = current.isNew,
             categories = categories,
             today = today,
-            onChange = onChange,
+            onTextChange = { title, note -> base?.let { onChange(it.copy(title = title, note = note)) } },
+            quick = quick,
+            onDismissQuick = { dismissedQuick = quickSignature },
             onOpenParam = { p, at ->
                 origin = at
                 param = p
@@ -182,8 +211,8 @@ fun TaskEditorSheet(
     }
 
     ParamPopup(open = param, origin = origin, onDismiss = { param = null }) { shownParam ->
-        val current = shown ?: return@ParamPopup
-        val update: (TaskDraft) -> Unit = onChange
+        val current = effective ?: return@ParamPopup
+        val update: (TaskDraft) -> Unit = manualChange
         val close = { param = null }
         when (shownParam) {
             Param.Date -> DatePanel(current, today, update, close)
@@ -211,7 +240,10 @@ private fun EditorContent(
     isNew: Boolean,
     categories: List<Category>,
     today: LocalDate,
-    onChange: (TaskDraft) -> Unit,
+    /** Правка названия и заметки — в черновик без наложенных распознанных значений. */
+    onTextChange: (title: String, note: String) -> Unit,
+    quick: QuickInput.Result?,
+    onDismissQuick: () -> Unit,
     onOpenParam: (Param, Offset) -> Unit,
     onSave: (TaskDraft) -> Unit,
     onDelete: (Long) -> Unit,
@@ -239,6 +271,12 @@ private fun EditorContent(
         imeWasVisible = imeVisible
     }
 
+    val activeQuick = quick
+    val accent = colors.accent
+    val highlight = remember(activeQuick, accent) {
+        activeQuick?.let { QuickHighlight(it.spans, accent) } ?: VisualTransformation.None
+    }
+
     Column(
         Modifier
             .verticalScroll(rememberScrollState())
@@ -258,7 +296,7 @@ private fun EditorContent(
         PlainField(
             value = draft.title,
             // Перевод строки в названии не нужен: «Готово» на клавиатуре закрывает ввод.
-            onValueChange = { onChange(draft.copy(title = it.replace('\n', ' '))) },
+            onValueChange = { onTextChange(it.replace('\n', ' '), draft.note) },
             placeholder = tr("Что нужно сделать?", "What needs doing?"),
             singleLine = false,
             maxLines = 5,
@@ -269,10 +307,21 @@ private fun EditorContent(
                 .padding(vertical = 6.dp),
             imeAction = ImeAction.Done,
             onImeAction = { focusManager.clearFocus() },
+            visualTransformation = highlight,
         )
+        AnimatedVisibility(
+            visible = activeQuick != null,
+            enter = expandVertically(TileSizeSpring, expandFrom = Alignment.Top) + fadeIn(TileFadeSpring),
+            exit = shrinkVertically(TileSizeSpring, shrinkTowards = Alignment.Top) + fadeOut(TileFadeSpring),
+        ) {
+            // Держим последнюю подсказку, пока она уезжает.
+            var shownQuick by remember { mutableStateOf(activeQuick) }
+            if (activeQuick != null) shownQuick = activeQuick
+            shownQuick?.let { q -> QuickChip(text = quickLabel(q, today, LocalLanguage.current), onDismiss = onDismissQuick) }
+        }
         PlainField(
             value = draft.note,
-            onValueChange = { onChange(draft.copy(note = it)) },
+            onValueChange = { onTextChange(draft.title, it) },
             placeholder = tr("Заметка", "Note"),
             style = MaterialTheme.typography.bodyLarge.copy(color = colors.textSecondary),
             modifier = Modifier
@@ -360,7 +409,8 @@ private fun EditorContent(
                     .height(54.dp)
                     .bouncyClickable(enabled = enabled, glowColor = Color.White, glowShape = Shapes.Pill) {
                         focusManager.clearFocus()
-                        onSave(draft)
+                        // Распознанные «завтра в 18» из названия убираем — они уже стоят в плитках.
+                        onSave(activeQuick?.let { draft.copy(title = QuickInput.strip(draft.title, it.spans)) } ?: draft)
                     }
                     .clip(Shapes.Pill)
                     .background(saveColor),
@@ -369,7 +419,7 @@ private fun EditorContent(
                 Text(
                     if (isNew) tr("Добавить", "Add") else tr("Сохранить", "Save"),
                     style = MaterialTheme.typography.labelLarge,
-                    color = Color.White,
+                    color = if (enabled) colors.onAccent else Color.White,
                 )
             }
         }
@@ -618,7 +668,7 @@ private fun DoneButton(onClick: () -> Unit) {
             .background(colors.accent),
         contentAlignment = Alignment.Center,
     ) {
-        Text(tr("Готово", "Done"), style = MaterialTheme.typography.labelLarge, color = Color.White)
+        Text(tr("Готово", "Done"), style = MaterialTheme.typography.labelLarge, color = colors.onAccent)
     }
 }
 
@@ -675,7 +725,7 @@ private fun TimePanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: 
                 timeSelectorSelectedContentColor = colors.accent,
                 timeSelectorUnselectedContainerColor = colors.chip,
                 timeSelectorUnselectedContentColor = colors.textPrimary,
-                clockDialSelectedContentColor = Color.White,
+                clockDialSelectedContentColor = colors.onAccent,
                 clockDialUnselectedContentColor = colors.textPrimary,
             ),
         )
@@ -855,7 +905,7 @@ private fun RecurrenceEditor(value: Recurrence, startDate: LocalDate, onChange: 
                         Text(
                             day.getDisplayName(JTextStyle.SHORT, appLocale),
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (on) Color.White else colors.textPrimary,
+                            color = if (on) colors.onAccent else colors.textPrimary,
                         )
                     }
                 }
@@ -974,6 +1024,7 @@ private fun PlainField(
     maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     imeAction: ImeAction = ImeAction.Default,
     onImeAction: () -> Unit = {},
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     val colors = WoodyTheme.colors
     val textStyle = style.copy(color = if (style.color == Color.Unspecified) colors.textPrimary else style.color)
@@ -983,6 +1034,7 @@ private fun PlainField(
         textStyle = textStyle,
         singleLine = singleLine,
         maxLines = maxLines,
+        visualTransformation = visualTransformation,
         cursorBrush = SolidColor(colors.accent),
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = imeAction),
         keyboardActions = KeyboardActions(onDone = { onImeAction() }),
@@ -997,6 +1049,64 @@ private fun PlainField(
         },
     )
 }
+
+/** Подсветка распознанных фраз в названии: цвет акцента, длина текста не меняется. */
+private class QuickHighlight(private val spans: List<IntRange>, private val color: Color) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val styled = buildAnnotatedString {
+            append(text)
+            spans.forEach { r ->
+                if (r.last < text.length) {
+                    addStyle(SpanStyle(color = color, background = color.copy(alpha = 0.12f)), r.first, r.last + 1)
+                }
+            }
+        }
+        return TransformedText(styled, OffsetMapping.Identity)
+    }
+
+    override fun equals(other: Any?) = other is QuickHighlight && other.spans == spans && other.color == color
+
+    override fun hashCode() = spans.hashCode() * 31 + color.hashCode()
+}
+
+/** Подсказка под названием: что распознано, и крестик «не надо». */
+@Composable
+private fun QuickChip(text: String, onDismiss: () -> Unit) {
+    val colors = WoodyTheme.colors
+    Row(
+        Modifier
+            .padding(bottom = 8.dp)
+            .clip(Shapes.Pill)
+            .background(colors.accent.copy(alpha = 0.12f))
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(WoodyIcons.Calendar, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.accent,
+            maxLines = 1,
+            modifier = Modifier.padding(start = 8.dp, end = 2.dp),
+        )
+        Icon(
+            WoodyIcons.Close,
+            contentDescription = tr("Не распознавать", "Don't detect"),
+            tint = colors.accent,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .bouncyClickable(onClick = onDismiss)
+                .padding(10.dp),
+        )
+    }
+}
+
+private fun quickLabel(q: QuickInput.Result, today: LocalDate, lang: AppLanguage): String = buildList {
+    q.date?.let { add(dateLabel(it, today, lang)) }
+    q.time?.let { add(it.format(TimeFormat)) }
+    q.recurrence?.let { add(recurrenceLabel(it, lang)) }
+}.joinToString(" · ")
 
 private fun dateLabel(date: LocalDate, today: LocalDate, lang: AppLanguage): String = when (date) {
     today -> lang.pick("Сегодня", "Today")

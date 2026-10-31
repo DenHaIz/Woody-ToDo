@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">Today\'s tasks: check them off right from the home screen</string>
+    <string name="widget_preview_task">Buy chicken</string>
+    <string name="widget_preview_meta">Today · 2 more</string>
+</resources>

@@ -97,6 +97,7 @@ import com.woody.planner.data.ThemeMode
 import com.woody.planner.domain.Category
 import com.woody.planner.reminders.Notifications
 import com.woody.planner.reminders.OemPower
+import com.woody.planner.widget.WidgetUpdater
 import com.woody.planner.ui.categories.CategoriesViewModel
 import com.woody.planner.ui.categories.CategoryEditorSheet
 import com.woody.planner.ui.categories.CategoryEmoji
@@ -271,6 +272,7 @@ private fun SettingsContent(
     var headerHeight by remember { mutableIntStateOf(0) }
     val theme by container.settings.themeMode.collectAsStateWithLifecycle(ThemeMode.System)
     val swipeStyle by container.settings.swipeStyle.collectAsStateWithLifecycle(SwipeStyle.Classic)
+    val dynamicColors by container.settings.dynamicColors.collectAsStateWithLifecycle(false)
     val counts by categoriesVm.counts.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
 
@@ -354,7 +356,12 @@ private fun SettingsContent(
                 LiquidSegmented(
                     count = ThemeMode.entries.size,
                     selectedIndex = theme.ordinal,
-                    onSelect = { index -> scope.launch { container.settings.setThemeMode(ThemeMode.entries[index]) } },
+                    onSelect = { index ->
+                        scope.launch {
+                            container.settings.setThemeMode(ThemeMode.entries[index])
+                            WidgetUpdater.refresh(context)
+                        }
+                    },
                     pillColor = colors.textPrimary,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -368,6 +375,30 @@ private fun SettingsContent(
                         color = if (selected) colors.background else colors.textPrimary,
                     )
                 }
+                Spacer(Modifier.height(10.dp))
+                // Цвета: фирменные Woody или Material You — из обоев телефона.
+                LiquidSegmented(
+                    count = 2,
+                    selectedIndex = if (dynamicColors) 1 else 0,
+                    onSelect = { index ->
+                        scope.launch {
+                            container.settings.setDynamicColors(index == 1)
+                            WidgetUpdater.refresh(context)
+                        }
+                    },
+                    pillColor = colors.accent,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(Shapes.Pill)
+                        .background(colors.chip),
+                ) { index, selected ->
+                    FitText(
+                        if (index == 0) tr("Цвета Woody", "Woody colors") else "Material You",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selected) colors.onAccent else colors.textPrimary,
+                    )
+                }
             }
 
             SettingsCard(tr("Язык", "Language")) {
@@ -379,6 +410,7 @@ private fun SettingsContent(
                         scope.launch {
                             container.settings.setLanguage(language)
                             container.repository.translateDefaultCategories(language)
+                            WidgetUpdater.refresh(context)
                         }
                     },
                     pillColor = colors.textPrimary,
@@ -411,7 +443,7 @@ private fun SettingsContent(
                     FitText(
                         SwipeStyle.entries[index].title(lang),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (selected) Color.White else colors.textPrimary,
+                        color = if (selected) colors.onAccent else colors.textPrimary,
                     )
                 }
                 AnimatedContent(
@@ -500,7 +532,7 @@ private fun SettingsContent(
                         FitText(
                             tr("через ${NudgeOptions[index]} мин", "after ${NudgeOptions[index]} min"),
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (selected) Color.White else colors.textPrimary,
+                            color = if (selected) colors.onAccent else colors.textPrimary,
                         )
                     }
                 }

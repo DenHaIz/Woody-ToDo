@@ -40,6 +40,7 @@ class SettingsRepository(private val context: Context) {
     private val languageKey = stringPreferencesKey("language")
     private val alarmClockKey = booleanPreferencesKey("alarm_clock_reminders")
     private val missedNudgeKey = intPreferencesKey("missed_nudge_minutes")
+    private val dynamicColorsKey = booleanPreferencesKey("dynamic_colors")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
         prefs[themeKey]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System
@@ -64,6 +65,13 @@ class SettingsRepository(private val context: Context) {
      * (по умолчанию). Работает только для задач со временем.
      */
     val missedNudgeMinutes: Flow<Int> = context.dataStore.data.map { it[missedNudgeKey] ?: 0 }
+
+    /** Цвета Material You (из обоев) вместо фирменных цветов Woody. По умолчанию — фирменные. */
+    val dynamicColors: Flow<Boolean> = context.dataStore.data.map { it[dynamicColorsKey] ?: false }
+
+    suspend fun setDynamicColors(enabled: Boolean) {
+        context.dataStore.edit { it[dynamicColorsKey] = enabled }
+    }
 
     suspend fun setMissedNudgeMinutes(minutes: Int) {
         context.dataStore.edit { it[missedNudgeKey] = minutes }

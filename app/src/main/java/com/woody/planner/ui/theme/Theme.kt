@@ -1,7 +1,11 @@
 package com.woody.planner.ui.theme
 
+import android.content.Context
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -11,6 +15,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,6 +46,10 @@ data class WoodyColors(
     val success: Color,
     val warning: Color,
     val chip: Color,
+    /** Текст и значки поверх акцентного цвета. */
+    val onAccent: Color = Color.White,
+    /** Цвета световых пятен фона, когда в дне нет категорий. */
+    val ambient: List<Color> = listOf(Brand.Blue, Brand.Crimson, Brand.Amber),
 )
 
 private val LightColors = WoodyColors(
@@ -104,10 +113,47 @@ private val AppTypography = Typography(
     labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp),
 )
 
+/**
+ * Цвета Material You: акцент, фон и текст берутся из системной палитры (по обоям), а форма
+ * интерфейса — стекло, полупрозрачные карточки — остаётся своей. Зелёный «готово» и оранжевый
+ * «перенести» не меняются: это смысловые цвета действий.
+ */
+private fun dynamicColors(scheme: ColorScheme, dark: Boolean): WoodyColors {
+    val base = if (dark) DarkColors else LightColors
+    return base.copy(
+        background = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainer,
+        card = (if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest).copy(alpha = if (dark) 0.74f else 0.8f),
+        cardBorder = if (dark) scheme.outlineVariant.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.9f),
+        textPrimary = scheme.onSurface,
+        textSecondary = scheme.onSurfaceVariant,
+        textTertiary = scheme.outline,
+        accent = scheme.primary,
+        onAccent = scheme.onPrimary,
+        glassTint = scheme.surfaceContainer.copy(alpha = if (dark) 0.35f else 0.32f),
+        scrim = scheme.scrim.copy(alpha = if (dark) 0.45f else 0.28f),
+        chip = scheme.onSurface.copy(alpha = if (dark) 0.08f else 0.06f),
+        ambient = listOf(scheme.primary, scheme.tertiary, scheme.secondary),
+    )
+}
+
+/** Палитра Woody вне Compose — например, для виджета на рабочем столе. */
+fun woodyColors(context: Context, dark: Boolean, dynamic: Boolean): WoodyColors = when {
+    dynamic -> dynamicColors(if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context), dark)
+    dark -> DarkColors
+    else -> LightColors
+}
+
+/** [dynamic] — цвета Material You вместо фирменных (Android 12+, у Woody это минимум). */
 @Composable
-fun WoodyTheme(darkTheme: Boolean, content: @Composable () -> Unit) {
-    val colors = if (darkTheme) DarkColors else LightColors
-    val scheme = if (darkTheme) {
+fun WoodyTheme(darkTheme: Boolean, dynamic: Boolean = false, content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val dynamicScheme = if (dynamic) {
+        if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        null
+    }
+    val colors = if (dynamicScheme != null) dynamicColors(dynamicScheme, darkTheme) else woodyColors(context, darkTheme, dynamic = false)
+    val scheme = dynamicScheme ?: if (darkTheme) {
         darkColorScheme(
             primary = colors.accent,
             secondary = Brand.Blue,

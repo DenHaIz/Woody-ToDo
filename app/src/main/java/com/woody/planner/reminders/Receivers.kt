@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import com.woody.planner.WoodyApp
 import com.woody.planner.data.toDomain
+import com.woody.planner.widget.WidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,6 +92,8 @@ class RescheduleReceiver : BroadcastReceiver() {
             -> {
                 val container = (context.applicationContext as WoodyApp).container
                 runAsync { container.reminders.rescheduleAll() }
+                // Сменились дата или время — виджет показывает новый «сегодня».
+                WidgetUpdater.refresh(context)
             }
         }
     }

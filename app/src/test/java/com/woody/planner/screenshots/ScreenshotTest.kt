@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.glance.appwidget.compose
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
@@ -103,10 +105,10 @@ class ScreenshotTest {
         repo.save(TaskDraft(title = "Разобрать почту", categoryId = 4, date = today))
     }
 
-    private fun render(dark: Boolean, openDay: LocalDate? = null, lang: AppLanguage = AppLanguage.Russian) {
+    private fun render(dark: Boolean, openDay: LocalDate? = null, lang: AppLanguage = AppLanguage.Russian, dynamic: Boolean = false) {
         compose.setContent {
             CompositionLocalProvider(LocalLanguage provides lang) {
-                WoodyTheme(darkTheme = dark) {
+                WoodyTheme(darkTheme = dark, dynamic = dynamic) {
                     WoodyAppShell(container, openDayRequest = openDay, onOpenDayHandled = {})
                 }
             }
@@ -212,6 +214,101 @@ class ScreenshotTest {
         shot("en_settings_reminders")
     }
 
+    @Test
+    fun materialYou() {
+        seed()
+        runBlocking { container.settings.setDynamicColors(true) }
+        render(dark = false, dynamic = true)
+        shot("material_you_day")
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        shot("material_you_editor")
+    }
+
+    @Test
+    fun materialYouDark() {
+        seed()
+        render(dark = true, dynamic = true)
+        compose.onNodeWithContentDescription("Добавить").performTouchInput { longClick() }
+        compose.waitForIdle()
+        shot("material_you_settings_dark")
+    }
+
+    /** «Купить хлеб завтра в 18»: фраза подсвечена, под названием — подсказка, плитки уже с датой и временем. */
+    @Test
+    fun naturalLanguage() {
+        seed()
+        render(dark = false)
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Купить хлеб завтра в 18")
+        compose.waitForIdle()
+        shot("quick_input")
+    }
+
+    /** Карточку подняли и тащат: сначала по списку, потом над лентой недели. */
+    @Test
+    fun dragFrames() {
+        seed()
+        render(dark = false)
+        val node = compose.onNodeWithText("Разобрать почту")
+        val bounds = node.fetchSemanticsNode().boundsInRoot
+        node.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(800)
+        compose.onRoot().performTouchInput {
+            repeat(6) {
+                moveBy(androidx.compose.ui.geometry.Offset(0f, -60f))
+                advanceEventTime(16)
+            }
+        }
+        compose.waitForIdle()
+        shot("drag_1_list")
+        val tomorrowCell = compose.onAllNodesWithText(LocalDate.now().plusDays(1).dayOfMonth.toString())
+            .fetchSemanticsNodes().filter { it.boundsInRoot.top < 700f }.maxBy { it.boundsInRoot.top }.boundsInRoot
+        compose.onRoot().performTouchInput {
+            val from = bounds.center + androidx.compose.ui.geometry.Offset(0f, -360f)
+            repeat(10) { i ->
+                moveTo(from + (tomorrowCell.center - from) * ((i + 1) / 10f))
+                advanceEventTime(16)
+            }
+        }
+        compose.waitForIdle()
+        shot("drag_2_day")
+        compose.onRoot().performTouchInput { up() }
+        compose.waitForIdle()
+    }
+
+    /** Виджет на тёмных обоях: одна строка (как под поисковой строкой) и растянутый вверх. */
+    @OptIn(androidx.glance.ExperimentalGlanceApi::class)
+    @Test
+    fun widget() {
+        seed()
+        val activity = compose.activity
+        listOf(
+            androidx.compose.ui.unit.DpSize(380.dp, 76.dp) to "widget_row",
+            androidx.compose.ui.unit.DpSize(380.dp, 300.dp) to "widget_tall",
+        ).forEach { (size, name) ->
+            val views = runBlocking { com.woody.planner.widget.TodayWidget().compose(activity, size = size) }
+            compose.runOnUiThread {
+                val density = activity.resources.displayMetrics.density
+                val wallpaper = android.widget.FrameLayout(activity).apply {
+                    setBackgroundColor(0xFF0B1630.toInt())
+                    setPadding((12 * density).toInt(), (24 * density).toInt(), (12 * density).toInt(), (24 * density).toInt())
+                }
+                val view = views.apply(activity, wallpaper)
+                wallpaper.addView(
+                    view,
+                    android.widget.FrameLayout.LayoutParams((size.width.value * density).toInt(), (size.height.value * density).toInt()),
+                )
+                activity.setContentView(wallpaper)
+            }
+            compose.waitForIdle()
+            androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
+                .captureRoboImage("build/outputs/roborazzi/$name.png")
+        }
+    }
+
     /** Длинное название обрезается в списке, а по нажатию карточка раскрывается и показывает его целиком. */
     @Test
     fun longTitleExpands() {
@@ -287,6 +384,8 @@ class ScreenshotTest {
         runBlocking { container.settings.setSwipeStyle(style) }
         seed()
         render(dark = false)
+        // Список читается из базы в фоне — ждём карточку, прежде чем тянуть её.
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Купить курицу").fetchSemanticsNodes().isNotEmpty() }
         compose.mainClock.autoAdvance = false
         val node = compose.onNodeWithText("Купить курицу")
         node.performTouchInput {

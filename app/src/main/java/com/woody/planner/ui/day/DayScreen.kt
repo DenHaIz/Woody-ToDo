@@ -48,6 +48,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.layout
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.draw.clip
@@ -103,6 +115,7 @@ fun DayScreen(
     onAddTask: () -> Unit = {},
 ) {
     val haptics = LocalHapticFeedback.current
+    val drag = remember { TaskDragState() }
     val today by vm.today.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val hazeState = LocalHazeState.current
@@ -135,40 +148,100 @@ fun DayScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier
-                .fillMaxSize()
-                .then(if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f) else Modifier)
-                .onDoubleTapBackground {
-                    haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-                    onAddTask()
-                },
-            beyondViewportPageCount = 1,
-            key = { it },
-        ) { page ->
-            val day = baseDay.plusDays((page - DAY_START_PAGE).toLong())
-            DayPage(
-                day = day,
-                vm = vm,
-                topPadding = with(density) { headerHeight.toDp() },
-                bottomPadding = bottomInset,
-                onEditTask = onEditTask,
-            )
-        }
+    CompositionLocalProvider(LocalTaskDrag provides drag) {
+        Box(Modifier.fillMaxSize()) {
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f) else Modifier)
+                    .onDoubleTapBackground {
+                        haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+                        onAddTask()
+                    },
+                beyondViewportPageCount = 1,
+                key = { it },
+            ) { page ->
+                val day = baseDay.plusDays((page - DAY_START_PAGE).toLong())
+                DayPage(
+                    day = day,
+                    vm = vm,
+                    topPadding = with(density) { headerHeight.toDp() },
+                    bottomPadding = bottomInset,
+                    onEditTask = onEditTask,
+                )
+            }
 
-        DayHeader(
-            vm = vm,
-            selected = selected,
-            today = today,
-            // Размер меряем снаружи отступов: в высоту шапки входит и статус-бар.
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .onSizeChanged { headerHeight = it.height }
-                .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+            DayHeader(
+                vm = vm,
+                selected = selected,
+                today = today,
+                // Размер меряем снаружи отступов: в высоту шапки входит и статус-бар.
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged {
+                    headerHeight = it.height
+                    drag.headerBottom = it.height.toFloat()
+                }
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+
+            drag.item?.let { item ->
+                if (drag.overHeader) {
+                    val target = drag.hoverDay?.takeIf { !item.isRecurring && it != item.day }
+                    DragGhost(item, drag.pointer, target)
+                }
+            }
+        }
+    }
+}
+
+/** Плашка с задачей под пальцем, пока её несут над лентой недели; с целевым днём — подсвечена. */
+@Composable
+private fun DragGhost(item: TaskItem, pointer: Offset, target: LocalDate?) {
+    val colors = WoodyTheme.colors
+    val lang = LocalLanguage.current
+    val lift = with(LocalDensity.current) { 34.dp.toPx() }
+    val highlight by animateColorAsState(if (target != null) colors.accent else colors.textPrimary, Motion.snappy(), label = "ghost")
+    Box(
+        Modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    val x = (pointer.x - p.width / 2f).coerceIn(0f, (constraints.maxWidth - p.width).toFloat().coerceAtLeast(0f))
+                    p.place(x.toInt(), (pointer.y - p.height - lift).toInt().coerceAtLeast(0))
+                }
+            },
+    ) {
+        Row(
+            Modifier
+                .widthIn(max = 260.dp)
+                .shadow(16.dp, Shapes.Pill)
+                .clip(Shapes.Pill)
+                .background(colors.card.compositeOver(colors.background))
+                .border(1.5.dp, highlight.copy(alpha = 0.6f), Shapes.Pill)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                item.title,
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (target != null) {
+                Text(
+                    " → " + lang.dayMonth(target),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = colors.accent,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -288,6 +361,12 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                         data
                     },
                     onSelect = vm::select,
+                    dropTarget = LocalTaskDrag.current?.let { d ->
+                        d.hoverDay?.takeIf { day -> d.item?.let { !it.isRecurring && it.day != day } == true }
+                    },
+                    onDayBounds = LocalTaskDrag.current?.let { d ->
+                        { day, bounds -> if (bounds == null) d.dayTargets.remove(day) else d.dayTargets[day] = bounds }
+                    },
                 )
             }
         }
@@ -304,28 +383,80 @@ private fun DayPage(
 ) {
     val agenda by remember(day) { vm.agenda(day) }.collectAsStateWithLifecycle(null)
     var doneExpanded by rememberSaveable(day) { mutableStateOf(true) }
+    val listState = rememberLazyListState()
+    var listTop by remember { mutableFloatStateOf(0f) }
+    val drag = LocalTaskDrag.current
+    val haptics = LocalHapticFeedback.current
+    // Порядок, который пользователь видит, пока тащит карточку; сохраняется при отпускании.
+    var localOrder by remember(day) { mutableStateOf<List<Long>?>(null) }
     val current = agenda ?: return
+    LaunchedEffect(current.untimed) { if (drag?.item == null) localOrder = null }
+    val untimed = localOrder?.let { order ->
+        current.untimed.sortedBy { item -> order.indexOf(item.taskId).let { if (it < 0) Int.MAX_VALUE else it } }
+    } ?: current.untimed
+
+    // Палец перешёл середину соседней задачи без времени — меняемся местами.
+    val moveUntimed: (TaskItem, Offset) -> Unit = move@{ item, pointer ->
+        val ids = untimed.map { it.taskId }
+        val from = ids.indexOf(item.taskId)
+        if (from < 0) return@move
+        // Смещения элементов считаются от начала содержимого — после верхнего отступа списка.
+        val y = pointer.y - listTop + listState.layoutInfo.viewportStartOffset
+        val byKey = untimed.associateBy { taskKey(it) }
+        val target = listState.layoutInfo.visibleItemsInfo.firstOrNull { info ->
+            byKey.containsKey(info.key) && y >= info.offset && y <= info.offset + info.size
+        } ?: return@move
+        val to = ids.indexOf(byKey.getValue(target.key as String).taskId)
+        if (to == from) return@move
+        val mid = target.offset + target.size / 2f
+        if ((to > from && y < mid) || (to < from && y > mid)) return@move
+        localOrder = ids.toMutableList().apply {
+            removeAt(from)
+            add(to, item.taskId)
+        }
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+    }
+    val dropTask: (TaskItem, LocalDate?) -> Unit = { item, target ->
+        val order = localOrder
+        when {
+            target != null && target != item.day && !item.isRecurring -> vm.moveToDay(item, target)
+            order != null && order != current.untimed.map { it.taskId } -> vm.reorder(order)
+            else -> localOrder = null
+        }
+    }
+    val hooks = DragHooks(onMove = moveUntimed, onDrop = dropTask)
     val warning = WoodyTheme.colors.warning
     // Мало задач — карточки крупнее, места на экране хватает.
     val large = current.total + current.overdue.size <= 3
     val lang = LocalLanguage.current
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .onGloballyPositioned { listTop = it.positionInRoot().y },
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = topPadding + 8.dp, bottom = bottomPadding + 24.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (current.isEmpty) {
             item(key = "empty") { EmptyDay(Modifier.animateItem()) }
         }
-        taskSection("overdue", lang.pick("Просрочено", "Overdue"), current.overdue, vm, onEditTask, large, warning)
-        taskSection("timed", lang.pick("По расписанию", "Scheduled"), current.timed, vm, onEditTask, large)
-        taskSection("untimed", if (current.timed.isEmpty()) lang.pick("Задачи", "Tasks") else lang.pick("В течение дня", "Anytime today"), current.untimed, vm, onEditTask, large)
+        taskSection("overdue", lang.pick("Просрочено", "Overdue"), current.overdue, vm, onEditTask, large, hooks, warning)
+        taskSection("timed", lang.pick("По расписанию", "Scheduled"), current.timed, vm, onEditTask, large, hooks)
+        taskSection(
+            "untimed",
+            if (current.timed.isEmpty()) lang.pick("Задачи", "Tasks") else lang.pick("В течение дня", "Anytime today"),
+            untimed,
+            vm,
+            onEditTask,
+            large,
+            hooks.copy(reorderable = true),
+        )
         if (current.done.isNotEmpty()) {
             item(key = "header-done") {
                 DoneHeader(current, doneExpanded, { doneExpanded = !doneExpanded }, Modifier.animateItem())
             }
-            if (doneExpanded) taskItems(current.done, vm, onEditTask, large)
+            if (doneExpanded) taskItems(current.done, vm, onEditTask, large, hooks)
         }
     }
 }
@@ -337,24 +468,43 @@ private fun LazyListScope.taskSection(
     vm: DayViewModel,
     onEditTask: (Long) -> Unit,
     large: Boolean,
+    hooks: DragHooks,
     accent: androidx.compose.ui.graphics.Color? = null,
 ) {
     if (tasks.isEmpty()) return
     item(key = "header-$key") {
         SectionHeader(title, Modifier.animateItem(), accent)
     }
-    taskItems(tasks, vm, onEditTask, large)
+    taskItems(tasks, vm, onEditTask, large, hooks)
 }
 
-private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onEditTask: (Long) -> Unit, large: Boolean) {
-    items(tasks, key = { "task-${it.taskId}-${it.day.toEpochDay()}" }, contentType = { "task" }) { item ->
+/** Что делать при перетаскивании карточек раздела: [reorderable] — можно менять порядок. */
+private data class DragHooks(
+    val onMove: (TaskItem, Offset) -> Unit,
+    val onDrop: (TaskItem, LocalDate?) -> Unit,
+    val reorderable: Boolean = false,
+)
+
+private fun taskKey(item: TaskItem) = "task-${item.taskId}-${item.day.toEpochDay()}"
+
+private fun LazyListScope.taskItems(tasks: List<TaskItem>, vm: DayViewModel, onEditTask: (Long) -> Unit, large: Boolean, hooks: DragHooks) {
+    items(tasks, key = { taskKey(it) }, contentType = { "task" }) { item ->
         val colors = WoodyTheme.colors
         SwipeableTaskCard(
-            modifier = Modifier.animateItem(
-                fadeInSpec = Motion.snappy(),
-                placementSpec = Motion.soft(),
-                fadeOutSpec = Motion.snappy(),
-            ),
+            modifier = Modifier
+                .animateItem(
+                    fadeInSpec = Motion.snappy(),
+                    placementSpec = Motion.soft(),
+                    fadeOutSpec = Motion.snappy(),
+                )
+                .taskDrag(
+                    item = item,
+                    // Выполненные не таскаем: удержание просто открывает редактор.
+                    enabled = !item.done,
+                    onMove = { if (hooks.reorderable) hooks.onMove(item, it) },
+                    onDrop = { hooks.onDrop(item, it) },
+                    onEdit = { onEditTask(item.taskId) },
+                ),
             startAction = SwipeAction(
                 icon = if (item.done) WoodyIcons.Undo else WoodyIcons.Check,
                 label = if (item.done) tr("Вернуть", "Undo") else tr("Готово", "Done"),

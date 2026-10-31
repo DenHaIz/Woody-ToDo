@@ -40,6 +40,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun get(id: Long): TaskEntity?
 
+    @Query("UPDATE tasks SET sortOrder = :order WHERE id = :id")
+    suspend fun setSortOrder(id: Long, order: Int)
+
     /** Задачи, которым могут понадобиться будильники: с напоминанием или со временем. */
     @Query("SELECT * FROM tasks WHERE reminderOffsetMin IS NOT NULL OR timeMinutes IS NOT NULL")
     suspend fun withAlarms(): List<TaskEntity>

@@ -10,7 +10,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import com.woody.planner.ui.theme.Brand
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.WoodyTheme
 import kotlin.random.Random
@@ -23,7 +22,7 @@ import kotlin.random.Random
 @Composable
 fun AmbientBackground(colors: List<Color>, seed: Long, modifier: Modifier = Modifier) {
     val theme = WoodyTheme.colors
-    val palette = (colors + listOf(Brand.Blue, Brand.Crimson, Brand.Amber)).take(3)
+    val palette = (colors + theme.ambient).take(3)
     val random = Random(seed)
     val blobs = List(3) { index ->
         Blob(

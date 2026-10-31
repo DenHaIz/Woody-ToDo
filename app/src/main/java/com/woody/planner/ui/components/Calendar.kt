@@ -31,6 +31,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -67,6 +72,10 @@ fun WeekStrip(
     summaries: @Composable (weekStart: LocalDate) -> List<DaySummary>,
     onSelect: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
+    /** День, на который сейчас перетаскивают задачу, — подсвечивается. */
+    dropTarget: LocalDate? = null,
+    /** Сообщает границы дней на экране — для переноса задач перетаскиванием. */
+    onDayBounds: ((LocalDate, Rect?) -> Unit)? = null,
 ) {
     val baseWeek = remember { today.weekStart() }
     fun pageOf(day: LocalDate) = WEEK_START_PAGE + ChronoUnit.WEEKS.between(baseWeek, day.weekStart()).toInt()
@@ -79,7 +88,7 @@ fun WeekStrip(
 
     HorizontalPager(state = pager, modifier = modifier.fillMaxWidth(), beyondViewportPageCount = 1) { page ->
         val weekStart = baseWeek.plusWeeks((page - WEEK_START_PAGE).toLong())
-        WeekRow(weekStart, selected, today, summaries(weekStart), onSelect)
+        WeekRow(weekStart, selected, today, summaries(weekStart), onSelect, dropTarget, onDayBounds)
     }
 }
 
@@ -90,9 +99,17 @@ private fun WeekRow(
     today: LocalDate,
     summaries: List<DaySummary>,
     onSelect: (LocalDate) -> Unit,
+    dropTarget: LocalDate?,
+    onDayBounds: ((LocalDate, Rect?) -> Unit)?,
 ) {
     val colors = WoodyTheme.colors
     val index = ChronoUnit.DAYS.between(weekStart, selected).toInt()
+    // Ушедшая неделя больше не цель для броска.
+    if (onDayBounds != null) {
+        DisposableEffect(weekStart) {
+            onDispose { repeat(7) { onDayBounds(weekStart.plusDays(it.toLong()), null) } }
+        }
+    }
     val inWeek = index in 0..6
     val target = index.coerceIn(0, 6).toFloat()
     val lead = animateFloatAsState(target, Motion.leading(), label = "lead")
@@ -126,9 +143,17 @@ private fun WeekRow(
                 Motion.snappy(),
                 label = "dayText",
             )
+            // Подсветка дня-цели: только внутри ячейки — лента обрезает всё, что выходит за её край.
+            val dropScale by animateFloatAsState(if (day == dropTarget) 0.94f else 1f, Motion.bouncy(), label = "drop")
             Column(
                 Modifier
                     .weight(1f)
+                    .then(if (onDayBounds != null) Modifier.onGloballyPositioned { onDayBounds(day, it.boundsInRoot()) } else Modifier)
+                    .graphicsLayer {
+                        scaleX = dropScale
+                        scaleY = dropScale
+                    }
+                    .then(if (day == dropTarget) Modifier.background(colors.accent.copy(alpha = 0.22f), CircleShape) else Modifier)
                     .clip(CircleShape)
                     .clickable(interactionSource = null, indication = null) {
                         if (!isSelected) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)

@@ -2,6 +2,7 @@ package com.woody.planner.ui
 
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.first
 import com.woody.planner.data.TaskDraft
 import com.woody.planner.ui.theme.WoodyTheme
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -323,5 +325,113 @@ class InteractionTest {
         compose.onRoot().performTouchInput { doubleClick(empty(width.toFloat(), height.toFloat())) }
         compose.waitForIdle()
         compose.onNodeWithText("Новая задача").assertExists()
+    }
+
+    /** Удержать карточку, перетащить и отпустить. */
+    private fun dragTask(title: String, by: (androidx.compose.ui.geometry.Rect) -> androidx.compose.ui.geometry.Offset) {
+        val node = compose.onNodeWithText(title)
+        val bounds = node.fetchSemanticsNode().boundsInRoot
+        node.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(800)
+        val target = by(bounds)
+        compose.onRoot().performTouchInput {
+            val start = bounds.center
+            repeat(10) { i ->
+                moveTo(start + (target - start) * ((i + 1) / 10f))
+                advanceEventTime(16)
+            }
+            up()
+        }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun dragChangesOrderOfTasks() {
+        start()
+        val before = compose.onNodeWithText("Разобрать почту").fetchSemanticsNode().boundsInRoot.top
+        // «Разобрать почту» — выше «Купить курицу».
+        val chickenTop = compose.onNodeWithText("Купить курицу").fetchSemanticsNode().boundsInRoot.top
+        dragTask("Разобрать почту") { androidx.compose.ui.geometry.Offset(it.center.x, chickenTop - 10f) }
+        compose.waitUntil(5_000) {
+            compose.onNodeWithText("Разобрать почту").fetchSemanticsNode().boundsInRoot.top <
+                compose.onNodeWithText("Купить курицу").fetchSemanticsNode().boundsInRoot.top
+        }
+        // Порядок сохранён в базе: после перезапуска экрана он тот же.
+        compose.runOnUiThread { compose.activity.setContent { App() } }
+        compose.waitForIdle()
+        awaitText("Разобрать почту")
+        assert(
+            compose.onNodeWithText("Разобрать почту").fetchSemanticsNode().boundsInRoot.top <
+                compose.onNodeWithText("Купить курицу").fetchSemanticsNode().boundsInRoot.top,
+        ) { "порядок не сохранился (было $before)" }
+    }
+
+    @Test
+    fun dragOntoWeekDayMovesTask() {
+        start()
+        val tomorrow = LocalDate.now().plusDays(1)
+        // Ячейка завтрашнего дня в ленте недели (если сегодня воскресенье — она на следующей неделе, тест неприменим).
+        if (tomorrow.dayOfWeek == java.time.DayOfWeek.MONDAY) return
+        val cell = compose.onAllNodesWithText(tomorrow.dayOfMonth.toString())
+            .fetchSemanticsNodes().filter { it.boundsInRoot.top < 700f }.maxBy { it.boundsInRoot.top }.boundsInRoot
+        dragTask("Купить курицу") { cell.center }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Перенесено на " + tomorrow.dayOfMonth, substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun longPressWithoutMovingOpensEditor() {
+        start()
+        compose.onNodeWithText("Купить курицу").performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(800)
+        compose.onNodeWithText("Купить курицу").performTouchInput { up() }
+        compose.waitForIdle()
+        compose.onNodeWithText("Задача", useUnmergedTree = true).assertExists()
+    }
+
+    @Test
+    fun naturalLanguageSetsDateAndTimeAndCleansTitle() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Купить хлеб завтра в 18")
+        compose.waitForIdle()
+        // Подсказка и плитки уже показывают распознанное.
+        compose.onNodeWithText("Завтра · 18:00").assertExists()
+        compose.onNodeWithContentDescription("Время").assertExists()
+        compose.onNodeWithText("18:00").assertExists()
+        compose.onNodeWithText("Добавить").performClick()
+        compose.waitForIdle()
+        val saved = runBlocking {
+            var task: com.woody.planner.data.TaskEntity? = null
+            repeat(50) {
+                task = container.database.taskDao().observeAll().first().firstOrNull { it.title.startsWith("Купить хлеб") }
+                if (task != null) return@repeat
+                Thread.sleep(50)
+            }
+            task
+        }
+        assert(saved != null) { "задача не сохранилась" }
+        assertEquals("Купить хлеб", saved!!.title)
+        assertEquals(LocalDate.now().plusDays(1).toEpochDay(), saved.startDate)
+        assertEquals(18 * 60, saved.timeMinutes)
+    }
+
+    @Test
+    fun dismissingRecognitionKeepsTitleAsTyped() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Сериал завтра")
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Не распознавать").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithContentDescription("Не распознавать").assertCountEquals(0)
+        // Плитка даты осталась «Сегодня», название — как набрали.
+        compose.onNodeWithContentDescription("Дата").assertTextContains("Сегодня")
+        compose.onNodeWithText("Сериал завтра").assertExists()
     }
 }

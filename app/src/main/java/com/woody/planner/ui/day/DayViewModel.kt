@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.woody.planner.AppContainer
 import com.woody.planner.data.AppLanguage
+import com.woody.planner.ui.i18n.dayMonth
 import com.woody.planner.domain.DayAgenda
 import com.woody.planner.domain.DaySummary
 import com.woody.planner.domain.SubtaskItem
@@ -77,6 +78,15 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
             }) { repository.moveTo(item.taskId, item.day) }
         }
     }
+
+    /** Перетащили на день в ленте недели. */
+    fun moveToDay(item: TaskItem, day: LocalDate) = viewModelScope.launch {
+        repository.moveTo(item.taskId, day)
+        offerUndo({ lang -> lang.pick("Перенесено на ", "Moved to ") + lang.dayMonth(day) }) { repository.moveTo(item.taskId, item.day) }
+    }
+
+    /** Новый порядок задач без времени. */
+    fun reorder(ids: List<Long>) = viewModelScope.launch { repository.reorder(ids) }
 
     fun delete(taskId: Long) = viewModelScope.launch {
         val deleted = repository.delete(taskId) ?: return@launch

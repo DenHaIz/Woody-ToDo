@@ -54,6 +54,8 @@ class DeletedTask internal constructor(
 class TaskRepository(
     private val db: WoodyDatabase,
     private val reminders: ReminderScheduler,
+    /** Задачи изменились — например, перерисовать виджет на рабочем столе. */
+    private val onChanged: () -> Unit = {},
 ) {
     private val tasks = db.taskDao()
     private val categoryDao = db.categoryDao()
@@ -115,6 +117,7 @@ class TaskRepository(
         // Выполнили в приложении — висящее напоминание о задаче больше не нужно.
         if (done) reminders.dismissNotification(taskId)
         reminders.schedule(taskId)
+        onChanged()
     }
 
     suspend fun setSubtaskDone(subtaskId: Long, day: LocalDate, done: Boolean) {
@@ -126,6 +129,26 @@ class TaskRepository(
     suspend fun moveTo(taskId: Long, day: LocalDate) {
         tasks.moveTo(taskId, day.toEpochDay())
         reminders.schedule(taskId)
+        onChanged()
+    }
+
+    /**
+     * Новый порядок задач дня (перетаскиванием). Задачам раздаются их же прежние значения порядка
+     * в новой последовательности — так не сдвигается порядок относительно задач других дней.
+     */
+    suspend fun reorder(ids: List<Long>) {
+        db.withTransaction {
+            val orders = ids.mapNotNull { tasks.get(it)?.sortOrder }.sorted()
+            if (orders.size != ids.size) return@withTransaction
+            var previous = Int.MIN_VALUE
+            ids.forEachIndexed { index, id ->
+                // Одинаковые значения разводим, иначе новый порядок не сохранится.
+                val order = maxOf(orders[index], previous + 1)
+                previous = order
+                tasks.setSortOrder(id, order)
+            }
+        }
+        onChanged()
     }
 
     /** Пропуск одного вхождения повторяющейся задачи. */
@@ -133,6 +156,7 @@ class TaskRepository(
         val entity = SkipEntity(taskId, day.toEpochDay())
         if (skipped) tasks.insertSkip(entity) else tasks.deleteSkip(entity)
         reminders.schedule(taskId)
+        onChanged()
     }
 
     suspend fun delete(taskId: Long): DeletedTask? {
@@ -146,6 +170,7 @@ class TaskRepository(
         )
         tasks.delete(taskId)
         reminders.cancel(taskId)
+        onChanged()
         return snapshot
     }
 
@@ -158,6 +183,7 @@ class TaskRepository(
             tasks.insertSubtaskChecks(deleted.checks)
         }
         reminders.schedule(deleted.task.id)
+        onChanged()
     }
 
     suspend fun loadDraft(taskId: Long): TaskDraft? {
@@ -196,6 +222,7 @@ class TaskRepository(
             .mapIndexed { index, s -> SubtaskEntity(id = s.id, taskId = draft.id, title = s.title.trim(), sortOrder = index) }
         val id = tasks.save(task.toEntity(), subtasks)
         reminders.schedule(id)
+        onChanged()
         return id
     }
 

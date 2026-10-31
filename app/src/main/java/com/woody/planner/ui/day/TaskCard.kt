@@ -23,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -91,13 +92,10 @@ fun TaskCard(
     ) {
         Column(
             Modifier
-                .combinedClickable(
+                // Удержание обрабатывает перетаскивание (taskDrag): поднять карточку или открыть редактор.
+                .clickable(
                     interactionSource = null,
                     indication = null,
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onEdit()
-                    },
                     onClick = { if (expandable) expanded = !expanded else onEdit() },
                 )
                 .animateContentSize(Motion.soft())

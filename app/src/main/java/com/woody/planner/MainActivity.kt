@@ -23,10 +23,17 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_NEW_TASK = "new_task"
+    }
+
     private val container get() = (application as WoodyApp).container
 
-    /** День, который нужно открыть (из уведомления). */
+    /** День, который нужно открыть (из уведомления или виджета). */
     private val openDayRequest = mutableStateOf<LocalDate?>(null)
+
+    /** «+» на виджете: сразу открыть новую задачу. */
+    private val newTaskRequest = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -42,19 +49,23 @@ class MainActivity : ComponentActivity() {
         setContent {
             val language by container.settings.language.collectAsStateWithLifecycle(null)
             val savedMode by container.settings.themeMode.collectAsStateWithLifecycle(null)
+            val dynamicColors by container.settings.dynamicColors.collectAsStateWithLifecycle(null)
             // Пока настройки читаются (миллисекунды), показываем фон окна — без мелькания чужого языка и темы.
             val mode = savedMode ?: return@setContent
+            val dynamic = dynamicColors ?: return@setContent
             val dark = when (mode) {
                 ThemeMode.System -> isSystemInDarkTheme()
                 ThemeMode.Light -> false
                 ThemeMode.Dark -> true
             }
             CompositionLocalProvider(LocalLanguage provides (language ?: return@setContent)) {
-                WoodyTheme(darkTheme = dark) {
+                WoodyTheme(darkTheme = dark, dynamic = dynamic) {
                     WoodyAppShell(
                         container = container,
                         openDayRequest = openDayRequest.value,
                         onOpenDayHandled = { openDayRequest.value = null },
+                        newTaskRequest = newTaskRequest.value,
+                        onNewTaskHandled = { newTaskRequest.value = false },
                     )
                 }
             }
@@ -72,6 +83,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_NEW_TASK, false) == true) newTaskRequest.value = true
         val epochDay = intent?.getLongExtra(Notifications.EXTRA_OPEN_DAY, Long.MIN_VALUE) ?: return
         if (epochDay != Long.MIN_VALUE) openDayRequest.value = LocalDate.ofEpochDay(epochDay)
     }

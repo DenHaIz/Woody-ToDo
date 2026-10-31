@@ -72,7 +72,14 @@ private data class Message(val id: Long, val text: String, val action: String?, 
  * а всё место отдано задачам.
  */
 @Composable
-fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDayHandled: () -> Unit) {
+fun WoodyAppShell(
+    container: AppContainer,
+    openDayRequest: LocalDate?,
+    onOpenDayHandled: () -> Unit,
+    /** «+» на виджете — открыть новую задачу. */
+    newTaskRequest: Boolean = false,
+    onNewTaskHandled: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val hazeState = rememberHazeState()
@@ -127,6 +134,14 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
             settingsOpen = false
             dayVm.select(openDayRequest)
             onOpenDayHandled()
+        }
+    }
+    // «+» на виджете — сразу новая задача на сегодня.
+    LaunchedEffect(newTaskRequest) {
+        if (newTaskRequest) {
+            settingsOpen = false
+            editorVm.openNew(today)
+            onNewTaskHandled()
         }
     }
     // Подсказка про удержание «+» — через пару секунд после первого запуска, пока меню ни разу не открывали.

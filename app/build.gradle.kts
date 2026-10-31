@@ -12,8 +12,8 @@ android {
         applicationId = "com.woody.planner"
         minSdk = 31
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 9
+        versionName = "0.9"
     }
 
     buildTypes {
@@ -21,7 +21,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Подпись debug-ключом, чтобы release-сборку можно было сразу поставить на телефон.
+            // РџРѕРґРїРёСЃСЊ debug-РєР»СЋС‡РѕРј, С‡С‚РѕР±С‹ release-СЃР±РѕСЂРєСѓ РјРѕР¶РЅРѕ Р±С‹Р»Рѕ СЃСЂР°Р·Сѓ РїРѕСЃС‚Р°РІРёС‚СЊ РЅР° С‚РµР»РµС„РѕРЅ.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -38,7 +38,7 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all { test ->
-            // Скриншоты (Robolectric) — только по запросу: gradlew testDebugUnitTest -Pscreenshots
+            // РЎРєСЂРёРЅС€РѕС‚С‹ (Robolectric) вЂ” С‚РѕР»СЊРєРѕ РїРѕ Р·Р°РїСЂРѕСЃСѓ: gradlew testDebugUnitTest -Pscreenshots
             if (project.hasProperty("screenshots")) {
                 test.systemProperty("roborazzi.test.record", "true")
                 test.systemProperty("robolectric.pixelCopyRenderMode", "hardware")
@@ -84,6 +84,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.profileinstaller)
+    implementation(libs.glance.appwidget)
 
     implementation(libs.haze)
     implementation(libs.haze.glass)

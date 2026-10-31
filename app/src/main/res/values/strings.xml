@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Woody</string>
+    <string name="app_name" translatable="false">Woody</string>
+    <string name="widget_description">Задачи на сегодня: отмечайте прямо с рабочего стола</string>
+    <string name="widget_preview_task">Купить курицу</string>
+    <string name="widget_preview_meta">Сегодня · ещё 2</string>
 </resources>

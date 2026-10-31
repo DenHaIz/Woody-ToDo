@@ -83,7 +83,7 @@ fun WoodyFab(
                 .liquidGlass(Shapes.Pill, tint = colors.accent.copy(alpha = 0.85f)),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(WoodyIcons.Plus, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+            Icon(WoodyIcons.Plus, contentDescription = null, tint = colors.onAccent, modifier = Modifier.size(30.dp))
         }
     }
 }
