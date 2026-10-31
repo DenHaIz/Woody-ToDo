@@ -145,34 +145,32 @@ private enum class Param(private val ru: String, private val en: String) {
 @Composable
 fun TaskEditorSheet(
     draft: TaskDraft?,
+    session: Long,
     categories: List<Category>,
     today: LocalDate,
+    onChange: (TaskDraft) -> Unit,
     onDismiss: () -> Unit,
     onSave: (TaskDraft) -> Unit,
     onDelete: (Long) -> Unit,
     onReminderEnabled: () -> Unit,
 ) {
-    // Рабочая копия черновика: её правят и лист, и окна параметров. Сбрасывается при каждом
-    // новом открытии и живёт, пока лист доигрывает анимацию закрытия.
-    var openedFor by remember { mutableStateOf<TaskDraft?>(null) }
-    var work by remember { mutableStateOf<TaskDraft?>(null) }
-    var param by remember { mutableStateOf<Param?>(null) }
+    // Черновик с правками живёт в EditorViewModel; здесь — только последний показанный,
+    // чтобы лист доиграл анимацию закрытия со своим содержимым.
+    var shown by remember { mutableStateOf(draft) }
+    if (draft != null) shown = draft
+    // Окно параметра принадлежит конкретному открытию редактора.
+    var param by remember(session) { mutableStateOf<Param?>(null) }
     var origin by remember { mutableStateOf(Offset.Unspecified) }
-    if (draft != null && draft !== openedFor) {
-        openedFor = draft
-        work = draft
-        param = null
-    }
     if (draft == null && param != null) param = null
 
     GlassSheet(visible = draft != null, onDismiss = onDismiss) {
-        val current = work ?: return@GlassSheet
+        val current = shown ?: return@GlassSheet
         EditorContent(
             draft = current,
-            isNew = openedFor?.isNew ?: true,
+            isNew = current.isNew,
             categories = categories,
             today = today,
-            onChange = { work = it },
+            onChange = onChange,
             onOpenParam = { p, at ->
                 origin = at
                 param = p
@@ -183,11 +181,11 @@ fun TaskEditorSheet(
         )
     }
 
-    ParamPopup(open = param, origin = origin, onDismiss = { param = null }) { shown ->
-        val current = work ?: return@ParamPopup
-        val update: (TaskDraft) -> Unit = { work = it }
+    ParamPopup(open = param, origin = origin, onDismiss = { param = null }) { shownParam ->
+        val current = shown ?: return@ParamPopup
+        val update: (TaskDraft) -> Unit = onChange
         val close = { param = null }
-        when (shown) {
+        when (shownParam) {
             Param.Date -> DatePanel(current, today, update, close)
             Param.Time -> TimePanel(current, update, close)
             Param.Category -> CategoryPanel(current, categories, update, close)
@@ -527,7 +525,8 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
                 .fillMaxSize()
                 .graphicsLayer { alpha = progress.value.coerceIn(0f, 1f) }
                 .background(colors.scrim)
-                .clickable(interactionSource = null, indication = null, onClick = onDismiss),
+                // Пока окно сворачивается, касания проходят насквозь — ничто невидимое не перекрывает экран.
+                .then(if (open != null) Modifier.clickable(interactionSource = null, indication = null, onClick = onDismiss) else Modifier),
         )
         var bounds by remember { mutableStateOf(Rect.Zero) }
         Box(
@@ -561,7 +560,13 @@ private fun ParamPopup(open: Param?, origin: Offset, onDismiss: () -> Unit, cont
                     .clip(Shapes.Panel)
                     .background(colors.background)
                     .border(1.dp, colors.cardBorder, Shapes.Panel)
-                    .clickable(interactionSource = null, indication = null) { /* тапы внутри окна не закрывают его */ }
+                    .then(
+                        if (open != null) {
+                            Modifier.clickable(interactionSource = null, indication = null) { /* тапы внутри окна не закрывают его */ }
+                        } else {
+                            Modifier
+                        },
+                    )
                     .heightIn(max = 640.dp)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 18.dp, vertical = 16.dp),

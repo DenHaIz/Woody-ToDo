@@ -30,10 +30,10 @@ fun AmbientBackground(colors: List<Color>, seed: Long, modifier: Modifier = Modi
             color = animateColorAsState(palette[index], Motion.soft(), label = "blob$index"),
             x = animateFloatAsState(BlobAnchors[index].x + random.nextFloat() * 0.3f - 0.15f, Motion.soft(), label = "x$index"),
             y = animateFloatAsState(BlobAnchors[index].y + random.nextFloat() * 0.2f - 0.1f, Motion.soft(), label = "y$index"),
-            radius = 0.55f + random.nextFloat() * 0.25f,
+            radius = 0.68f + random.nextFloat() * 0.3f,
         )
     }
-    val strength = if (theme.isDark) 0.30f else 0.36f
+    val strength = if (theme.isDark) 0.40f else 0.46f
     Canvas(modifier) {
         drawRect(theme.background)
         blobs.forEach { drawBlob(it, strength) }
@@ -54,7 +54,7 @@ private fun DrawScope.drawBlob(blob: Blob, strength: Float) {
     val radius = size.width * blob.radius
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(blob.color.value.copy(alpha = strength), blob.color.value.copy(alpha = strength * 0.4f), Color.Transparent),
+            colors = listOf(blob.color.value.copy(alpha = strength), blob.color.value.copy(alpha = strength * 0.5f), Color.Transparent),
             center = center,
             radius = radius,
         ),

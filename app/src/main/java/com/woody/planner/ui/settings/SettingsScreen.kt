@@ -241,8 +241,8 @@ fun SettingsPage(
 
 /** Почти линейная кривая: скорость в середине лишь на треть выше, чем у краёв. */
 private val EvenEasing = CubicBezierEasing(0.3f, 0.15f, 0.7f, 0.85f)
-private const val RevealMs = 500
-private const val CollapseMs = 420
+private const val RevealMs = 360
+private const val CollapseMs = 300
 
 /** Скруглённый прямоугольник, растущий из [from] (кнопка) до размеров экрана по [progress]. */
 private class RevealShape(private val from: Rect, private val progress: Float, private val extraCorner: Float) : Shape {

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -29,6 +30,7 @@ import com.woody.planner.data.SwipeStyle
 import com.woody.planner.ui.i18n.LocalLanguage
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.performScrollTo
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.first
@@ -59,16 +61,19 @@ class InteractionTest {
             container.repository.save(TaskDraft(title = "Купить курицу", date = today))
             container.repository.save(TaskDraft(title = "Разобрать почту", date = today))
         }
-        compose.setContent {
-            // Как в MainActivity: язык берётся из настроек и меняется на лету.
-            val lang by container.settings.language.collectAsStateWithLifecycle(AppLanguage.Russian)
-            CompositionLocalProvider(LocalLanguage provides lang) {
-                WoodyTheme(darkTheme = false) {
-                    WoodyAppShell(container, openDayRequest = null, onOpenDayHandled = {})
-                }
+        compose.setContent { App() }
+        compose.waitForIdle()
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun App() {
+        // Как в MainActivity: язык берётся из настроек и меняется на лету.
+        val lang by container.settings.language.collectAsStateWithLifecycle(AppLanguage.Russian)
+        CompositionLocalProvider(LocalLanguage provides lang) {
+            WoodyTheme(darkTheme = false) {
+                WoodyAppShell(container, openDayRequest = null, onOpenDayHandled = {})
             }
         }
-        compose.waitForIdle()
     }
 
     /** Действия пишут в базу в фоновом потоке — ждём результат, а не только окончания анимаций. */
@@ -257,5 +262,47 @@ class InteractionTest {
         awaitText("Обычный точный будильник, без значка")
         compose.onNodeWithText("Как будильник").performClick()
         compose.waitUntil(5_000) { runBlocking { container.settings.alarmClockReminders.first() } }
+    }
+
+    /**
+     * Сценарий из жалобы: набрали название, нажали плитку — текст не должен стираться, окно должно
+     * открываться, а после закрытия окон весь экран должен оставаться нажимаемым.
+     */
+    @Test
+    fun typedTitleSurvivesTileWindowsAndScreenRebuild() {
+        start()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("Купить хлеб")
+        compose.waitForIdle()
+
+        compose.onNodeWithContentDescription("Время").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("param-window").assertExists()
+        compose.onNodeWithText("13:00").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("param-window").assertCountEquals(0)
+        compose.onNodeWithText("Купить хлеб").assertExists()
+
+        // Система пересоздала экран (поворот, нехватка памяти) — набранное и выбранное на месте.
+        compose.runOnUiThread { compose.activity.setContent { App() } }
+        compose.waitForIdle()
+        compose.onNodeWithText("Купить хлеб").assertExists()
+        compose.onNodeWithText("13:00").assertExists()
+
+        // Окна снова открываются, фон после них не перехватывает касания.
+        compose.onNodeWithContentDescription("Дата").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Завтра").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Купить хлеб").assertExists()
+        compose.onNodeWithText("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Добавить").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Новая задача").assertExists()
+        // Новое открытие — чистый черновик.
+        compose.onAllNodes(hasSetTextAction() and hasText("Купить хлеб")).assertCountEquals(0)
     }
 }

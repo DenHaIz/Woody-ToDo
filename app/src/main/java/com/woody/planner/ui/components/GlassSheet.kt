@@ -67,7 +67,8 @@ fun GlassSheet(
             Modifier
                 .fillMaxSize()
                 .background(colors.scrim)
-                .clickable(interactionSource = null, indication = null, onClick = onDismiss),
+                // Во время исчезновения фон не перехватывает касания.
+                .then(if (visible) Modifier.clickable(interactionSource = null, indication = null, onClick = onDismiss) else Modifier),
         )
     }
     AnimatedVisibility(
@@ -83,10 +84,13 @@ fun GlassSheet(
         var backProgress by remember { mutableFloatStateOf(0f) }
         val scope = rememberCoroutineScope()
         val dismissDistance = with(LocalDensity.current) { 110.dp.toPx() }
+        // Быстрый взмах закрывает лист, только если его действительно потянули, а не дёрнуло раскладкой
+        // (например, когда прячется клавиатура и лист съезжает вниз).
+        val flingDistance = with(LocalDensity.current) { 28.dp.toPx() }
         val currentDismiss by rememberUpdatedState(onDismiss)
 
         fun settle(velocity: Float) {
-            if (drag > dismissDistance || velocity > 1600f) {
+            if (drag > dismissDistance || (velocity > 1600f && drag > flingDistance)) {
                 currentDismiss()
             } else {
                 scope.launch { animate(drag, 0f, animationSpec = Motion.bouncy()) { v, _ -> drag = v } }
@@ -157,7 +161,13 @@ fun GlassSheet(
                     .heightIn(max = maxSheetHeight)
                     .fillMaxWidth()
                     .liquidGlass(Shapes.Sheet, tint = colors.background.copy(alpha = if (colors.isDark) 0.74f else 0.66f))
-                    .clickable(interactionSource = null, indication = null) { /* не пропускать тапы к фону */ }
+                    .then(
+                        if (visible) {
+                            Modifier.clickable(interactionSource = null, indication = null) { /* не пропускать тапы к фону */ }
+                        } else {
+                            Modifier
+                        },
+                    )
                     .nestedScroll(nestedScroll)
                     // Участки без прокрутки (ручка, заголовок) тоже тянут лист.
                     .pointerInput(Unit) {

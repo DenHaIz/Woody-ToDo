@@ -82,6 +82,7 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
     val categoriesVm: CategoriesViewModel = viewModel { CategoriesViewModel(container) }
 
     val draft by editorVm.draft.collectAsStateWithLifecycle()
+    val editorSession by editorVm.session.collectAsStateWithLifecycle()
     val categories by editorVm.categories.collectAsStateWithLifecycle()
     val selectedDay by dayVm.selected.collectAsStateWithLifecycle()
     val today by dayVm.today.collectAsStateWithLifecycle()
@@ -183,8 +184,10 @@ fun WoodyAppShell(container: AppContainer, openDayRequest: LocalDate?, onOpenDay
 
             TaskEditorSheet(
                 draft = draft,
+                session = editorSession,
                 categories = categories,
                 today = today,
+                onChange = editorVm::update,
                 onDismiss = editorVm::close,
                 onSave = editorVm::save,
                 onDelete = { id ->

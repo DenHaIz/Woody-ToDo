@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.woody.planner.R
 import com.woody.planner.data.AppLanguage
@@ -198,12 +199,12 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                     Column {
                         FitText(dayTitle(day, today, LocalLanguage.current), style = MaterialTheme.typography.displaySmall, color = colors.textPrimary)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
+                            // Рядом может стоять кнопка «Сегодня»: дата с днём недели ужимается шрифтом, а не обрезается.
+                            FitText(
                                 daySubtitle(day, today, LocalLanguage.current),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                minSize = 9.sp,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             Icon(
