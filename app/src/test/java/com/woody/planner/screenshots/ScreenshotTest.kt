@@ -299,6 +299,7 @@ class ScreenshotTest {
         renderWidget(
             androidx.compose.ui.unit.DpSize(380.dp, 76.dp) to "widget_row",
             androidx.compose.ui.unit.DpSize(340.dp, 84.dp) to "widget_phone",
+            androidx.compose.ui.unit.DpSize(372.dp, 100.dp) to "widget_phone_big",
             androidx.compose.ui.unit.DpSize(380.dp, 300.dp) to "widget_tall",
         )
     }

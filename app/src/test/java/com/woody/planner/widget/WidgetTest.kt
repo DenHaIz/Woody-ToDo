@@ -23,7 +23,7 @@ import org.robolectric.annotation.Config
 import java.time.LocalDate
 
 /**
- * Виджет рисуется прямо в приёмнике — без сессий Glance и WorkManager (на HyperOS без автозапуска
+ * Виджет рисуется прямо в приёмнике — без сессий Glance и WorkManager (на vivo с OriginOS
  * они не стартовали, и виджет оставался бесконечной загрузкой).
  */
 @RunWith(AndroidJUnit4::class)
@@ -69,8 +69,26 @@ class WidgetTest {
             putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 90)
         }
         val sizes = WidgetUpdater.sizesOf(options)
-        assertTrue(sizes == listOf(DpSize(300.dp, 90.dp), DpSize(420.dp, 60.dp)))
+        assertTrue(sizes.take(2) == listOf(DpSize(300.dp, 90.dp), DpSize(420.dp, 60.dp)))
+        // Плюс «ступени» повыше на случай, если лаунчер занизил размер.
+        assertTrue(sizes.drop(2).all { it.width == 300.dp && it.height > 60.dp })
+        assertTrue(sizes.size <= 10)
         assertTrue(WidgetUpdater.sizesOf(null).size == 1)
+    }
+
+    @Test
+    fun underreportedSizeGetsTallerVariants() {
+        // Лаунчер сообщил 380×70, а на деле виджет выше — должны быть варианты до 1.5× высоты.
+        val options = android.os.Bundle().apply {
+            putParcelableArrayList(AppWidgetManager.OPTION_APPWIDGET_SIZES, arrayListOf(android.util.SizeF(380f, 70f)))
+        }
+        val sizes = WidgetUpdater.sizesOf(options)
+        assertTrue("$sizes", sizes.first() == DpSize(380.dp, 70.dp))
+        assertTrue("$sizes", sizes.maxOf { it.height } >= 105.dp)
+        // Все варианты рисуются и складываются в один виджет.
+        val views = runBlocking { WidgetUpdater.render(app, 1, sizes) }
+        val host = FrameLayout(app)
+        host.addView(views.apply(app, host))
     }
 
     @Test

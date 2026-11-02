@@ -12,8 +12,8 @@ android {
         applicationId = "com.woody.planner"
         minSdk = 31
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.0"
+        versionCode = 12
+        versionName = "1.0.1"
     }
 
     buildTypes {

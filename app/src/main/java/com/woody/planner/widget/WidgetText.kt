@@ -22,12 +22,12 @@ internal object WidgetText {
         return if (words.size > MaxWords) words.take(MaxWords).joinToString(" ") + "…" else words.joinToString(" ")
     }
 
-    fun metaSize(size: Float): Float = (size * 0.68f).coerceIn(11f, 16f)
+    fun metaSize(size: Float): Float = (size * 0.68f).coerceIn(11f, 21f)
 
     /** Самый крупный кегль, с которым название помещается в [width]×[height] dp. */
     fun fit(title: String, width: Float, height: Float): TitleFit {
         val text = shorten(title)
-        val max = (height * 0.36f).coerceIn(15f, 24f)
+        val max = (height * 0.4f).coerceIn(15f, 32f)
         // Короткое — одной строкой и крупно; длинное — в две строки; подпись (время, категория)
         // убираем только если иначе название не помещается.
         val attempts = listOf(

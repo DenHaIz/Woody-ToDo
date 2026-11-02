@@ -27,7 +27,7 @@ import java.time.ZoneId
 
 /**
  * Приёмник виджета «Сегодня». Виджет рисуется прямо здесь, за доли секунды, — без сессий Glance
- * и WorkManager: на прошивках, которые не дают запускать фоновые задачи (HyperOS без автозапуска),
+ * и WorkManager: на прошивках, которые не дают запускать фоновые задачи (vivo OriginOS: Glance для vivo отправляет работу в WorkManager, а прошивка его не запускает),
  * сессия не стартовала, и виджет навсегда оставался «загрузкой».
  */
 class TodayWidgetReceiver : AppWidgetProvider() {
@@ -130,21 +130,33 @@ object WidgetUpdater {
         val exact = options?.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
             ?.filter { it.width > 0 && it.height > 0 }
             ?.map { DpSize(it.width.dp, it.height.dp) }
-        if (!exact.isNullOrEmpty()) return exact.take(MaxSizes)
         val minWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH) ?: 0
         val maxWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH) ?: 0
         val minHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT) ?: 0
         val maxHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT) ?: 0
-        if (minWidth <= 0 || minHeight <= 0) return listOf(DefaultSize)
-        // Портрет: узкий и высокий, альбом: широкий и низкий.
-        return listOf(
-            DpSize(minWidth.dp, maxHeight.coerceAtLeast(minHeight).dp),
-            DpSize(maxWidth.coerceAtLeast(minWidth).dp, minHeight.dp),
-        )
+        val reported = buildList {
+            exact?.let { addAll(it.take(4)) }
+            if (minWidth > 0 && minHeight > 0) {
+                // Портрет: узкий и высокий, альбом: широкий и низкий.
+                add(DpSize(minWidth.dp, maxHeight.coerceAtLeast(minHeight).dp))
+                add(DpSize(maxWidth.coerceAtLeast(minWidth).dp, minHeight.dp))
+            }
+        }.distinct()
+        if (reported.isEmpty()) return listOf(DefaultSize)
+        // Некоторые лаунчеры (vivo OriginOS) сообщают размер меньше настоящего — тогда содержимое занимало
+        // половину виджета. Добавляем варианты повыше: система сама показывает самый крупный из тех,
+        // что помещаются в настоящий размер, так что лишние ступени ничего не ломают.
+        val width = reported.minOf { it.width }
+        val low = reported.minOf { it.height }
+        val high = maxOf(reported.maxOf { it.height }, low * 1.5f)
+        val ladder = (1..LadderSteps).map { DpSize(width, low + (high - low) * it / LadderSteps.toFloat()) }
+        return (reported + ladder).distinct().take(MaxSizes)
     }
 
     private val DefaultSize = DpSize(250.dp, 64.dp)
-    private const val MaxSizes = 4
+    private const val LadderSteps = 4
+    /** Не больше 10 вариантов: каждый — отдельная отрисовка и место в памяти лаунчера. */
+    private const val MaxSizes = 10
 
     /**
      * Будильник без пробуждения (RTC): в полночь телефон не будится — виджет перерисуется,

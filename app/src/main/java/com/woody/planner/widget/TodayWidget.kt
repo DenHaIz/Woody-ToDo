@@ -118,13 +118,13 @@ private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
  */
 private class Metrics(size: DpSize, private val fontScale: Float) {
     val tall = size.height >= TodayWidget.Tall.height
-    val padH = if (tall) 16.dp else (size.height * 0.18f).coerceIn(10.dp, 16.dp)
-    val padV = if (tall) 14.dp else (size.height * 0.1f).coerceIn(4.dp, 12.dp)
+    val padH = if (tall) 16.dp else (size.height * 0.16f).coerceIn(10.dp, 18.dp)
+    val padV = if (tall) 14.dp else (size.height * 0.07f).coerceIn(3.dp, 10.dp)
     private val inner = size.height - padV * 2
 
     /** Кружок-счётчик и «+». */
-    val button = if (tall) 52.dp else (inner * 0.82f).coerceIn(36.dp, 54.dp)
-    val check = if (tall) 34.dp else button * 0.58f
+    val button = if (tall) 52.dp else (inner * 0.86f).coerceIn(36.dp, 84.dp)
+    val check = if (tall) 34.dp else button * 0.52f
     val gap = (button * 0.2f).coerceIn(8.dp, 12.dp)
     val checkGap = gap * 0.7f
 
@@ -326,7 +326,7 @@ private fun CheckCircle(item: TaskItem, palette: WidgetPalette, m: Metrics) {
             // Свои данные у каждой задачи — чтобы система не склеила кружки в один PendingIntent.
             .setData("woody://widget/toggle/${item.taskId}/${item.day.toEpochDay()}/${!item.done}".toUri()),
     )
-    val circle = m.check * 0.82f
+    val circle = m.check * 0.88f
     Box(
         GlanceModifier.size(m.check).clickable(toggle),
         contentAlignment = Alignment.Center,
