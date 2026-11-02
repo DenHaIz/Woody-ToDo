@@ -888,7 +888,7 @@ private fun ToggleRow(title: String, status: String, checked: Boolean, onChange:
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
             FitText(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-            Text(status, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 2)
+            Text(status, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 3)
         }
         Box(
             Modifier
@@ -939,7 +939,8 @@ private fun PermissionRow(
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
             FitText(title, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-            FitText(status, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            // Обычный перенос строк, а не ужатие: рядом с кнопкой длинный статус иначе становится крошечным.
+            Text(status, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 3)
         }
         if (!ok) {
             Text(

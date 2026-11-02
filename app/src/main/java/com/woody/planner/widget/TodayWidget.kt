@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.ColorFilter
@@ -12,6 +15,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -108,9 +112,36 @@ private class WidgetPalette(light: WoodyColors, dark: WoodyColors) {
 
 private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
 
+/**
+ * Размеры элементов — от реального размера виджета, чтобы содержимое заполняло всё место:
+ * в одну строку всё считается от высоты, у растянутого — крупные строки списка.
+ */
+private class Metrics(size: DpSize, private val fontScale: Float) {
+    val tall = size.height >= TodayWidget.Tall.height
+    val padH = if (tall) 16.dp else (size.height * 0.18f).coerceIn(10.dp, 16.dp)
+    val padV = if (tall) 14.dp else (size.height * 0.1f).coerceIn(4.dp, 12.dp)
+    private val inner = size.height - padV * 2
+
+    /** Кружок-счётчик и «+». */
+    val button = if (tall) 52.dp else (inner * 0.82f).coerceIn(36.dp, 54.dp)
+    val check = if (tall) 34.dp else button * 0.58f
+    val gap = (button * 0.2f).coerceIn(8.dp, 12.dp)
+    val checkGap = gap * 0.7f
+
+    /** Место под название ближайшей задачи в однострочном виджете. */
+    val textWidth = size.width - padH * 2 - button * 2 - check - gap * 2 - checkGap
+    val textHeight = inner
+
+    /** Высота под список задач растянутого виджета (под заголовком). */
+    val listHeight = inner - button - 10.dp
+
+    /** Кегль в dp → sp: системный масштаб шрифта не должен ломать подобранную по месту вёрстку. */
+    fun sp(dp: Float): TextUnit = (dp / fontScale).sp
+}
+
 @Composable
 private fun WidgetContent(data: WidgetData, palette: WidgetPalette, lang: AppLanguage) {
-    val tall = LocalSize.current.height >= TodayWidget.Tall.height
+    val m = Metrics(LocalSize.current, LocalContext.current.resources.configuration.fontScale)
     Box(
         GlanceModifier
             .fillMaxSize()
@@ -118,95 +149,97 @@ private fun WidgetContent(data: WidgetData, palette: WidgetPalette, lang: AppLan
             .cornerRadius(26.dp)
             .background(palette.background)
             .clickable(actionStartActivity(openApp(data.day, newTask = false)))
-            .padding(horizontal = 14.dp, vertical = if (tall) 12.dp else 6.dp),
+            .padding(horizontal = m.padH, vertical = m.padV),
         contentAlignment = Alignment.CenterStart,
     ) {
-        if (tall) TallLayout(data, palette, lang) else OneRowLayout(data, palette, lang)
+        if (m.tall) TallLayout(data, palette, lang, m) else OneRowLayout(data, palette, lang, m)
     }
 }
 
 /** Одна строка: счётчик, ближайшая задача, «+». */
 @Composable
-private fun OneRowLayout(data: WidgetData, palette: WidgetPalette, lang: AppLanguage) {
+private fun OneRowLayout(data: WidgetData, palette: WidgetPalette, lang: AppLanguage, m: Metrics) {
     val next = data.open.firstOrNull()
     Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-        Counter(data, palette)
-        Spacer(GlanceModifier.width(12.dp))
+        Counter(data, palette, m)
+        Spacer(GlanceModifier.width(m.gap))
         if (next != null) {
-            CheckCircle(next, palette)
-            Spacer(GlanceModifier.width(10.dp))
-            Column(GlanceModifier.defaultWeight()) {
-                Text(
-                    next.title,
-                    style = TextStyle(color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                    maxLines = 1,
-                )
-                Text(
-                    meta(next, data, lang),
-                    style = TextStyle(color = palette.secondary, fontSize = 12.sp),
-                    maxLines = 1,
-                )
-            }
+            CheckCircle(next, palette, m)
+            Spacer(GlanceModifier.width(m.checkGap))
+            TitleBlock(next.title, meta(next, data, lang), palette, m, GlanceModifier.defaultWeight())
         } else {
-            Column(GlanceModifier.defaultWeight()) {
-                Text(
-                    if (data.total == 0) lang.pick("Свободный день", "A free day") else lang.pick("Всё сделано!", "All done!"),
-                    style = TextStyle(color = palette.text, fontSize = 15.sp, fontWeight = FontWeight.Medium),
-                    maxLines = 1,
-                )
-                Text(
-                    lang.pick("Сегодня", "Today"),
-                    style = TextStyle(color = palette.secondary, fontSize = 12.sp),
-                    maxLines = 1,
-                )
-            }
+            TitleBlock(
+                if (data.total == 0) lang.pick("Свободный день", "A free day") else lang.pick("Всё сделано!", "All done!"),
+                lang.pick("Сегодня", "Today"),
+                palette,
+                m,
+                GlanceModifier.defaultWeight(),
+            )
         }
-        Spacer(GlanceModifier.width(8.dp))
-        AddButton(data, palette, lang)
+        Spacer(GlanceModifier.width(m.gap))
+        AddButton(data, palette, lang, m)
+    }
+}
+
+/** Название с подписью: кегль и число строк подбираются под длину и место ([WidgetText]). */
+@Composable
+private fun TitleBlock(title: String, meta: String, palette: WidgetPalette, m: Metrics, modifier: GlanceModifier) {
+    val fit = WidgetText.fit(title, m.textWidth.value, m.textHeight.value)
+    Column(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            fit.text,
+            style = TextStyle(color = palette.text, fontSize = m.sp(fit.size), fontWeight = FontWeight.Medium),
+            maxLines = fit.lines,
+        )
+        if (fit.meta) {
+            Text(meta, style = TextStyle(color = palette.secondary, fontSize = m.sp(fit.metaSize)), maxLines = 1)
+        }
     }
 }
 
 /** Выше одной строки: заголовок и список задач дня. */
 @Composable
-private fun TallLayout(data: WidgetData, palette: WidgetPalette, lang: AppLanguage) {
+private fun TallLayout(data: WidgetData, palette: WidgetPalette, lang: AppLanguage, m: Metrics) {
     Column(GlanceModifier.fillMaxSize()) {
         Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Counter(data, palette)
-            Spacer(GlanceModifier.width(12.dp))
+            Counter(data, palette, m)
+            Spacer(GlanceModifier.width(m.gap))
             Column(GlanceModifier.defaultWeight()) {
                 Text(
                     lang.pick("Сегодня", "Today"),
-                    style = TextStyle(color = palette.text, fontSize = 18.sp, fontWeight = FontWeight.Bold),
+                    style = TextStyle(color = palette.text, fontSize = m.sp(22f), fontWeight = FontWeight.Bold),
                     maxLines = 1,
                 )
                 Text(
                     data.day.format(DateTimeFormatter.ofPattern(lang.pick("d MMMM", "MMMM d"), lang.locale)),
-                    style = TextStyle(color = palette.secondary, fontSize = 12.sp),
+                    style = TextStyle(color = palette.secondary, fontSize = m.sp(14f)),
                     maxLines = 1,
                 )
             }
-            AddButton(data, palette, lang)
+            AddButton(data, palette, lang, m)
         }
-        Spacer(GlanceModifier.height(8.dp))
+        Spacer(GlanceModifier.height(10.dp))
         val items = data.open + data.done
         if (items.isEmpty()) {
             Text(
                 lang.pick("Свободный день — нажмите +", "A free day — tap +"),
-                style = TextStyle(color = palette.secondary, fontSize = 14.sp),
+                style = TextStyle(color = palette.secondary, fontSize = m.sp(16f)),
                 modifier = GlanceModifier.padding(top = 6.dp),
             )
         } else {
-            // Сколько строк помещается по высоте; остальное — «ещё N». Обычная колонка, без списка-коллекции:
-            // так виджет одинаково рисуется на любых прошивках.
-            val fit = (((LocalSize.current.height - 84.dp) / RowHeight).toInt()).coerceAtLeast(1)
-            val shown = if (items.size > fit) items.take(fit - 1) else items
+            // Сколько строк помещается по высоте; остальное — «ещё N». Строки делят всю высоту — без пустоты внизу.
+            // Обычная колонка, без списка-коллекции: так виджет одинаково рисуется на любых прошивках.
+            val fitsAll = MinRow * items.size <= m.listHeight
+            val slots = if (fitsAll) items.size else ((m.listHeight - MoreLine) / MinRow).toInt().coerceAtLeast(1)
+            val shown = items.take(slots)
+            val rowHeight = if (fitsAll) minOf(MaxRow, m.listHeight / items.size) else (m.listHeight - MoreLine) / slots
             Column(GlanceModifier.fillMaxWidth()) {
-                shown.forEach { item -> TaskRow(item, palette) }
+                shown.forEach { item -> TaskRow(item, palette, m, rowHeight) }
                 if (shown.size < items.size) {
                     Text(
                         lang.pick("ещё ${items.size - shown.size}", "${items.size - shown.size} more"),
-                        style = TextStyle(color = palette.secondary, fontSize = 13.sp),
-                        modifier = GlanceModifier.padding(start = 40.dp, top = 4.dp),
+                        style = TextStyle(color = palette.secondary, fontSize = m.sp(15f)),
+                        modifier = GlanceModifier.padding(start = m.check + m.checkGap, top = 8.dp),
                     )
                 }
             }
@@ -214,21 +247,24 @@ private fun TallLayout(data: WidgetData, palette: WidgetPalette, lang: AppLangua
     }
 }
 
-private val RowHeight = 34.dp
+private val MinRow = 40.dp
+private val MaxRow = 52.dp
+/** Строка «ещё N». */
+private val MoreLine = 30.dp
 
 @Composable
-private fun TaskRow(item: TaskItem, palette: WidgetPalette) {
+private fun TaskRow(item: TaskItem, palette: WidgetPalette, m: Metrics, height: Dp) {
     Row(
-        GlanceModifier.fillMaxWidth().height(RowHeight),
+        GlanceModifier.fillMaxWidth().height(height),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CheckCircle(item, palette)
-        Spacer(GlanceModifier.width(10.dp))
+        CheckCircle(item, palette, m)
+        Spacer(GlanceModifier.width(m.checkGap))
         Text(
-            item.title,
+            WidgetText.shorten(item.title),
             style = TextStyle(
                 color = if (item.done) palette.tertiary else palette.text,
-                fontSize = 15.sp,
+                fontSize = m.sp(17f),
                 textDecoration = if (item.done) TextDecoration.LineThrough else TextDecoration.None,
             ),
             maxLines = 1,
@@ -237,7 +273,7 @@ private fun TaskRow(item: TaskItem, palette: WidgetPalette) {
         item.time?.let {
             Text(
                 it.format(TimeFormat),
-                style = TextStyle(color = if (item.overdue) palette.accent else palette.secondary, fontSize = 13.sp),
+                style = TextStyle(color = if (item.overdue) palette.accent else palette.secondary, fontSize = m.sp(15f)),
                 modifier = GlanceModifier.padding(start = 8.dp),
             )
         }
@@ -246,12 +282,13 @@ private fun TaskRow(item: TaskItem, palette: WidgetPalette) {
 
 /** Кружок «сделано из стольких»: в нём число выполненных и всего. */
 @Composable
-private fun Counter(data: WidgetData, palette: WidgetPalette) {
+private fun Counter(data: WidgetData, palette: WidgetPalette, m: Metrics) {
     val allDone = data.total > 0 && data.open.isEmpty()
+    val label = "${data.done.size}/${data.total}"
     Box(
         GlanceModifier
-            .size(42.dp)
-            .cornerRadius(21.dp)
+            .size(m.button)
+            .cornerRadius(m.button / 2)
             .background(if (allDone) palette.success else palette.accentSoft),
         contentAlignment = Alignment.Center,
     ) {
@@ -260,12 +297,17 @@ private fun Counter(data: WidgetData, palette: WidgetPalette) {
                 ImageProvider(R.drawable.ic_widget_check),
                 contentDescription = null,
                 colorFilter = ColorFilter.tint(palette.onAccent),
-                modifier = GlanceModifier.size(22.dp),
+                modifier = GlanceModifier.size(m.button * 0.52f),
             )
         } else {
             Text(
-                "${data.done.size}/${data.total}",
-                style = TextStyle(color = palette.accent, fontSize = 13.sp, fontWeight = FontWeight.Bold),
+                label,
+                style = TextStyle(
+                    color = palette.accent,
+                    // «12/15» шире «0/1» — чуть мельче, чтобы не вылезало из кружка.
+                    fontSize = m.sp(m.button.value * if (label.length <= 3) 0.32f else 0.25f),
+                    fontWeight = FontWeight.Bold,
+                ),
                 maxLines = 1,
             )
         }
@@ -274,7 +316,7 @@ private fun Counter(data: WidgetData, palette: WidgetPalette) {
 
 /** Кружок-галочка: нажатие отмечает задачу прямо с рабочего стола. */
 @Composable
-private fun CheckCircle(item: TaskItem, palette: WidgetPalette) {
+private fun CheckCircle(item: TaskItem, palette: WidgetPalette, m: Metrics) {
     val toggle = actionSendBroadcast(
         Intent(WidgetUpdater.ACTION_TOGGLE)
             .setClassName("com.woody.planner", TodayWidgetReceiver::class.java.name)
@@ -284,20 +326,21 @@ private fun CheckCircle(item: TaskItem, palette: WidgetPalette) {
             // Свои данные у каждой задачи — чтобы система не склеила кружки в один PendingIntent.
             .setData("woody://widget/toggle/${item.taskId}/${item.day.toEpochDay()}/${!item.done}".toUri()),
     )
+    val circle = m.check * 0.82f
     Box(
-        GlanceModifier.size(30.dp).clickable(toggle),
+        GlanceModifier.size(m.check).clickable(toggle),
         contentAlignment = Alignment.Center,
     ) {
         if (item.done) {
             Box(
-                GlanceModifier.size(24.dp).cornerRadius(12.dp).background(palette.success),
+                GlanceModifier.size(circle).cornerRadius(circle / 2).background(palette.success),
                 contentAlignment = Alignment.Center,
             ) {
                 Image(
                     ImageProvider(R.drawable.ic_widget_check),
                     contentDescription = null,
                     colorFilter = ColorFilter.tint(palette.onAccent),
-                    modifier = GlanceModifier.size(16.dp),
+                    modifier = GlanceModifier.size(circle * 0.66f),
                 )
             }
         } else {
@@ -305,18 +348,18 @@ private fun CheckCircle(item: TaskItem, palette: WidgetPalette) {
                 ImageProvider(R.drawable.ic_widget_circle),
                 contentDescription = item.title,
                 colorFilter = ColorFilter.tint(palette.tertiary),
-                modifier = GlanceModifier.size(24.dp),
+                modifier = GlanceModifier.size(circle),
             )
         }
     }
 }
 
 @Composable
-private fun AddButton(data: WidgetData, palette: WidgetPalette, lang: AppLanguage) {
+private fun AddButton(data: WidgetData, palette: WidgetPalette, lang: AppLanguage, m: Metrics) {
     Box(
         GlanceModifier
-            .size(40.dp)
-            .cornerRadius(20.dp)
+            .size(m.button)
+            .cornerRadius(m.button / 2)
             .background(palette.accent)
             .clickable(actionStartActivity(openApp(data.day, newTask = true))),
         contentAlignment = Alignment.Center,
@@ -325,7 +368,7 @@ private fun AddButton(data: WidgetData, palette: WidgetPalette, lang: AppLanguag
             ImageProvider(R.drawable.ic_widget_plus),
             contentDescription = lang.pick("Новая задача", "New task"),
             colorFilter = ColorFilter.tint(palette.onAccent),
-            modifier = GlanceModifier.size(22.dp),
+            modifier = GlanceModifier.size(m.button * 0.5f),
         )
     }
 }

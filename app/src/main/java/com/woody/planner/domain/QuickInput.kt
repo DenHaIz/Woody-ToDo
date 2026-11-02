@@ -23,7 +23,8 @@ object QuickInput {
         fun signature(text: String): String = spans.joinToString("|") { text.substring(it.first, it.last + 1).lowercase() }
     }
 
-    fun parse(text: String, today: LocalDate): Result? {
+    /** [now] — текущее время: от него считается «через 30 минут». */
+    fun parse(text: String, today: LocalDate, now: LocalTime = LocalTime.now()): Result? {
         if (text.isBlank()) return null
         val lower = text.lowercase()
         val candidates = Rules.flatMap { rule ->
@@ -44,6 +45,12 @@ object QuickInput {
             when (c.kind) {
                 Kind.Date -> if (date == null) date = v.date
                 Kind.Time -> if (time == null) time = v.time
+                // «через 30 минут» — и время, и (если перевалит за полночь) дата.
+                Kind.Moment -> {
+                    val at = today.atTime(now.withSecond(0).withNano(0)).plusMinutes(v.minutesFromNow ?: 0)
+                    if (date == null) date = at.toLocalDate()
+                    if (time == null) time = at.toLocalTime()
+                }
                 Kind.PartOfDay -> if (partOfDay == null) partOfDay = v.partOfDay
                 Kind.Repeat -> if (recurrence == null) {
                     recurrence = v.recurrence
@@ -57,6 +64,8 @@ object QuickInput {
             time = when {
                 time == null -> pod.default
                 pod.afternoon && time.hour < 12 -> time.plusHours(12)
+                // «утром в 6»: без «утром» «в 6» считалось бы вечером — возвращаем утро.
+                !pod.afternoon && time.hour in 13..18 -> time.minusHours(12)
                 else -> time
             }
         }
@@ -83,7 +92,7 @@ object QuickInput {
 
     // --- правила ---
 
-    private enum class Kind { Date, Time, PartOfDay, Repeat }
+    private enum class Kind { Date, Time, Moment, PartOfDay, Repeat }
 
     private class PartOfDay(val default: LocalTime, val afternoon: Boolean)
 
@@ -92,6 +101,7 @@ object QuickInput {
         val time: LocalTime? = null,
         val partOfDay: PartOfDay? = null,
         val recurrence: Recurrence? = null,
+        val minutesFromNow: Long? = null,
     )
 
     private class Candidate(val range: IntRange, val kind: Kind, val value: Value)
@@ -137,6 +147,15 @@ object QuickInput {
     private val allPlural = WeekdayPlural.joinToString("|") { it.second }
     private val allMonths = Months.joinToString("|")
 
+    /** После «в 5» без уточнения может идти только слово о дне («в 5 завтра»), иначе это не время: «в 2 этапа», «в 3 банка». */
+    private val timeFollowers = "завтра|сегодня|послезавтра|утром|дн[её]м|вечером|ночью|каждый|каждую|каждое|по|" +
+        "tomorrow|today|tonight|every|on|next|this|in|$allWeekdays|$allPlural"
+    private val notCounted = "(?!\\s+(?!(?:$timeFollowers)(?![\\p{L}\\d]))\\p{L}{3,})"
+    private const val Suffix = "утра|дня|вечера|ночи|am|pm|a\\.m\\.|p\\.m\\."
+
+    /** Число с единицей — не дата: «молоко 2.5%», «вода 1.5 л». */
+    private const val NotAmount = "(?!\\s*(?:%|(?:кг|мл|л|г|kg|ml|lb|l|g)(?![\\p{L}\\d])))"
+
     private fun weekdayOf(word: String): DayOfWeek? =
         WeekdayForms.firstOrNull { (_, forms) -> word in forms.split('|') }?.first
             ?: WeekdayPlural.firstOrNull { (_, forms) -> word in forms.split('|') }?.first
@@ -151,6 +170,12 @@ object QuickInput {
         val y = year?.let { if (it < 100) 2000 + it else it } ?: today.year
         val date = runCatching { LocalDate.of(y, month, day) }.getOrNull() ?: return null
         return if (year == null && date < today) date.plusYears(1) else date
+    }
+
+    /** «30 минут» / «2 часа» → минуты от текущего момента (не дальше недели). */
+    private fun relative(amount: Long, unit: String): Value? {
+        val minutes = if (unit.startsWith("м") || unit.startsWith("min")) amount else amount * 60
+        return if (minutes in 1..7 * 24 * 60) Value(minutesFromNow = minutes) else null
     }
 
     private fun clock(hour: Int, minute: Int, suffix: String?): LocalTime? {
@@ -218,16 +243,30 @@ object QuickInput {
             dateOf(today, m.groupValues[2].toInt(), month, null)?.let { Value(date = it) }
         },
         // 15.11 или 15/11[/2026] — только если это не время («в 18.30»).
-        Rule(Kind.Date, "${B}(?<!(?:в|at)\\s)(\\d{1,2})[./](\\d{1,2})(?:[./](\\d{2,4}))?$E") { m, today ->
+        Rule(Kind.Date, "${B}(?<!(?:в|at)\\s)(\\d{1,2})[./](\\d{1,2})(?:[./](\\d{2,4}))?$NotAmount$E") { m, today ->
             val month = m.groupValues[2].toInt()
             if (month !in 1..12) return@Rule null
             dateOf(today, m.groupValues[1].toInt(), month, m.groupValues[3].toIntOrNull())?.let { Value(date = it) }
         },
 
+        // --- через сколько от текущего момента ---
+        Rule(Kind.Moment, "${B}(?:через|in)\\s+(полчаса|half an hour)$E") { _, _ -> Value(minutesFromNow = 30) },
+        Rule(
+            Kind.Moment,
+            "${B}(?:через|in)\\s+(?:(\\d{1,3})\\s*|an?\\s+)?(минуту|минуты|минут|мин|часа|часов|час|minutes?|mins?|hours?)$E",
+        ) { m, _ -> relative(m.groupValues[1].toLongOrNull() ?: 1, m.groupValues[2]) },
+        Rule(Kind.Moment, "${B}\\+\\s*(\\d{1,3})\\s*(минуту|минуты|минут|мин|часа|часов|час|ч|minutes?|mins?|min|hours?|h)$E") { m, _ ->
+            relative(m.groupValues[1].toLong(), m.groupValues[2])
+        },
+
         // --- время ---
-        Rule(Kind.Time, "${B}(?:в|во|к|at|@)\\s*(\\d{1,2})(?:[:.](\\d{2}))?(?:\\s*(?:час(?:а|ов)?))?(?:\\s*(утра|дня|вечера|ночи|am|pm|a\\.m\\.|p\\.m\\.))?$E") { m, _ ->
-            clock(m.groupValues[1].toInt(), m.groupValues[2].toIntOrNull() ?: 0, m.groupValues[3].ifEmpty { null })
-                ?.let { Value(time = it) }
+        // «в 18:30 [вечера]» или «в 7 [часов] [вечера]»; без минут и уточнения — только если дальше не существительное.
+        Rule(
+            Kind.Time,
+            "${B}(?:в|во|к|at|@)\\s*(\\d{1,2})(?:[:.](\\d{2})(?:\\s*($Suffix))?|(?:\\s*(?:час(?:а|ов)?))?(?:\\s*($Suffix)|$notCounted))$E",
+        ) { m, _ ->
+            val suffix = m.groupValues[3].ifEmpty { m.groupValues[4] }.ifEmpty { null }
+            clock(m.groupValues[1].toInt(), m.groupValues[2].toIntOrNull() ?: 0, suffix)?.let { Value(time = it) }
         },
         Rule(Kind.Time, "${B}(\\d{1,2}):(\\d{2})$E") { m, _ ->
             val h = m.groupValues[1].toInt()
@@ -239,7 +278,8 @@ object QuickInput {
         },
         Rule(Kind.Time, "${B}(?:в\\s+)?(полдень)$E|${B}(?:at\\s+)?(noon)$E") { _, _ -> Value(time = LocalTime.NOON) },
         Rule(Kind.PartOfDay, "${B}(утром|in the morning|morning)$E") { _, _ -> Value(partOfDay = PartOfDay(LocalTime.of(9, 0), afternoon = false)) },
-        Rule(Kind.PartOfDay, "${B}(дн[её]м|in the afternoon|afternoon)$E") { _, _ -> Value(partOfDay = PartOfDay(LocalTime.of(13, 0), afternoon = true)) },
+        // «С днём рождения» — не время дня.
+        Rule(Kind.PartOfDay, "${B}(дн[её]м(?!\\s+рожд)|in the afternoon|afternoon)$E") { _, _ -> Value(partOfDay = PartOfDay(LocalTime.of(13, 0), afternoon = true)) },
         Rule(Kind.PartOfDay, "${B}(вечером|in the evening|evening|tonight)$E") { _, _ ->
             Value(partOfDay = PartOfDay(LocalTime.of(19, 0), afternoon = true))
         },

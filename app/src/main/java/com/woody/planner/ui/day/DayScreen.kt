@@ -97,6 +97,7 @@ import com.woody.planner.ui.theme.WoodyIcons
 import com.woody.planner.ui.theme.WoodyTheme
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -122,7 +123,8 @@ fun DayScreen(
     val density = LocalDensity.current
     var headerHeight by remember { mutableIntStateOf(0) }
 
-    val baseDay = remember { selected }
+    // Сохраняется вместе с номером страницы пейджера — после поворота страница и день совпадают.
+    val baseDay = rememberSaveable { selected }
     fun pageOf(day: LocalDate) = DAY_START_PAGE + ChronoUnit.DAYS.between(baseDay, day).toInt()
     val pager = rememberPagerState(initialPage = pageOf(selected)) { DAY_PAGES }
 
@@ -137,8 +139,10 @@ fun DayScreen(
     }
     // Выбор дня в ленте/календаре → плавная прокрутка страниц.
     LaunchedEffect(selected) {
+        // День выбрали, пока страницы ещё докручиваются, — дожидаемся остановки, а не теряем выбор.
+        snapshotFlow { pager.isScrollInProgress }.first { !it }
         val target = pageOf(selected)
-        if (pager.currentPage != target && !pager.isScrollInProgress) {
+        if (pager.currentPage != target) {
             programmaticScroll = true
             try {
                 pager.animateScrollToPage(target, animationSpec = Motion.soft())

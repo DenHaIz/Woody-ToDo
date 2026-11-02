@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -32,14 +33,20 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
 
     val canScheduleExact: Boolean get() = container.reminders.canScheduleExact
 
-    private val defaultReminder: StateFlow<Int?> =
-        container.settings.defaultReminderMinutes.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private var opening = false
 
     fun openNew(day: LocalDate) {
         // Повторное нажатие «+» при открытом редакторе не стирает набранное.
-        if (_draft.value != null) return
-        _session.value++
-        _draft.value = TaskDraft(date = day, defaultReminder = defaultReminder.value)
+        if (_draft.value != null || opening) return
+        opening = true
+        viewModelScope.launch {
+            // Настройку читаем в момент открытия: при запуске с виджета она могла ещё не загрузиться.
+            val reminder = container.settings.defaultReminderMinutes.first()
+            opening = false
+            if (_draft.value != null) return@launch
+            _session.value++
+            _draft.value = TaskDraft(date = day, defaultReminder = reminder)
+        }
     }
 
     fun openEdit(taskId: Long) = viewModelScope.launch {

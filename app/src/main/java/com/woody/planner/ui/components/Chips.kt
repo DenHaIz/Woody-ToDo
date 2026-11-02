@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.woody.planner.ui.theme.Motion
 import com.woody.planner.ui.theme.Shapes
@@ -49,7 +50,7 @@ fun WoodyChip(
     ) {
         if (icon != null) Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
         if (leadingText != null) Text(leadingText, style = MaterialTheme.typography.labelLarge)
-        Text(label, color = content, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+        Text(label, color = content, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -70,6 +71,8 @@ fun MetaTag(
                 color = color,
                 style = if (large) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelMedium,
                 maxLines = 1,
+                // Длинное название категории — с многоточием, чтобы было видно, что оно не целиком.
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

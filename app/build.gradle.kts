@@ -12,8 +12,8 @@ android {
         applicationId = "com.woody.planner"
         minSdk = 31
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.91"
+        versionCode = 11
+        versionName = "1.0"
     }
 
     buildTypes {
@@ -21,7 +21,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // РџРѕРґРїРёСЃСЊ debug-РєР»СЋС‡РѕРј, С‡С‚РѕР±С‹ release-СЃР±РѕСЂРєСѓ РјРѕР¶РЅРѕ Р±С‹Р»Рѕ СЃСЂР°Р·Сѓ РїРѕСЃС‚Р°РІРёС‚СЊ РЅР° С‚РµР»РµС„РѕРЅ.
+            // Р СџР С•Р Т‘Р С—Р С‘РЎРѓРЎРЉ debug-Р С”Р В»РЎР‹РЎвЂЎР С•Р С, РЎвЂЎРЎвЂљР С•Р В±РЎвЂ№ release-РЎРѓР В±Р С•РЎР‚Р С”РЎС“ Р СР С•Р В¶Р Р…Р С• Р В±РЎвЂ№Р В»Р С• РЎРѓРЎР‚Р В°Р В·РЎС“ Р С—Р С•РЎРѓРЎвЂљР В°Р Р†Р С‘РЎвЂљРЎРЉ Р Р…Р В° РЎвЂљР ВµР В»Р ВµРЎвЂћР С•Р Р….
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -38,7 +38,7 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all { test ->
-            // РЎРєСЂРёРЅС€РѕС‚С‹ (Robolectric) вЂ” С‚РѕР»СЊРєРѕ РїРѕ Р·Р°РїСЂРѕСЃСѓ: gradlew testDebugUnitTest -Pscreenshots
+            // Р РЋР С”РЎР‚Р С‘Р Р…РЎв‚¬Р С•РЎвЂљРЎвЂ№ (Robolectric) РІР‚вЂќ РЎвЂљР С•Р В»РЎРЉР С”Р С• Р С—Р С• Р В·Р В°Р С—РЎР‚Р С•РЎРѓРЎС“: gradlew testDebugUnitTest -Pscreenshots
             if (project.hasProperty("screenshots")) {
                 test.systemProperty("roborazzi.test.record", "true")
                 test.systemProperty("robolectric.pixelCopyRenderMode", "hardware")

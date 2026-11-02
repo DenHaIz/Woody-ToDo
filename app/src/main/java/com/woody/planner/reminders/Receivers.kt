@@ -19,7 +19,8 @@ private fun BroadcastReceiver.runAsync(block: suspend () -> Unit) {
     val pending = goAsync()
     CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
         try {
-            block()
+            // Ошибка в фоне (например, задачу уже удалили) не должна ронять приложение.
+            runCatching { block() }
         } finally {
             pending.finish()
         }
@@ -41,10 +42,15 @@ class ReminderReceiver : BroadcastReceiver() {
 
         runAsync {
             when (intent.action) {
-                ACTION_FIRE -> {
-                    val task = container.database.taskDao().get(taskId)?.toDomain()
-                    if (task != null) Notifications.show(context, task, day, container.settings.language.first())
-                    container.reminders.schedule(taskId)
+                ACTION_FIRE, ACTION_SNOOZED -> {
+                    val dao = container.database.taskDao()
+                    val task = dao.get(taskId)?.toDomain()
+                    val epochDay = day.toEpochDay()
+                    // Отложенное напоминание о задаче, которую уже отметили, не нужно.
+                    val handled = dao.completionsOf(taskId).any { it.epochDay == epochDay } ||
+                        dao.skipsOf(taskId).any { it.epochDay == epochDay }
+                    if (task != null && !handled) Notifications.show(context, task, day, container.settings.language.first())
+                    if (intent.action == ACTION_FIRE) container.reminders.schedule(taskId)
                 }
                 ACTION_MISSED -> {
                     val dao = container.database.taskDao()
@@ -59,7 +65,10 @@ class ReminderReceiver : BroadcastReceiver() {
                 }
                 ACTION_DONE -> {
                     Notifications.cancel(context, taskId)
-                    container.repository.setDone(taskId, day, done = true)
+                    // Задачу могли удалить, пока уведомление висело.
+                    if (container.database.taskDao().get(taskId) != null) {
+                        container.repository.setDone(taskId, day, done = true)
+                    }
                 }
                 ACTION_SNOOZE -> {
                     Notifications.cancel(context, taskId)
@@ -75,6 +84,8 @@ class ReminderReceiver : BroadcastReceiver() {
         const val ACTION_SNOOZE = "com.woody.planner.REMINDER_SNOOZE"
         const val ACTION_TEST = "com.woody.planner.REMINDER_TEST"
         const val ACTION_MISSED = "com.woody.planner.REMINDER_MISSED"
+        /** Срабатывание отложенного напоминания — свой PendingIntent, не тот, что у основного. */
+        const val ACTION_SNOOZED = "com.woody.planner.REMINDER_SNOOZED"
         const val EXTRA_TASK_ID = "task_id"
         const val EXTRA_EPOCH_DAY = "epoch_day"
     }

@@ -163,6 +163,7 @@ class TaskRepository(
     suspend fun setSkipped(taskId: Long, day: LocalDate, skipped: Boolean) {
         val entity = SkipEntity(taskId, day.toEpochDay())
         if (skipped) tasks.insertSkip(entity) else tasks.deleteSkip(entity)
+        if (skipped) reminders.dismissNotification(taskId)
         reminders.schedule(taskId)
         onChanged()
     }
@@ -178,6 +179,7 @@ class TaskRepository(
         )
         tasks.delete(taskId)
         reminders.cancel(taskId)
+        reminders.dismissNotification(taskId)
         onChanged()
         return snapshot
     }
@@ -213,6 +215,7 @@ class TaskRepository(
 
     suspend fun save(draft: TaskDraft): Long {
         val isNew = draft.isNew
+        val before = if (isNew) null else tasks.get(draft.id)?.toDomain()
         val task = Task(
             id = draft.id,
             title = draft.title.trim(),
@@ -229,7 +232,10 @@ class TaskRepository(
             .filter { it.title.isNotBlank() }
             .mapIndexed { index, s -> SubtaskEntity(id = s.id, taskId = draft.id, title = s.title.trim(), sortOrder = index) }
         val id = tasks.save(task.toEntity(), subtasks)
-        reminders.schedule(id)
+        // Напоминание только что поставили или поменяли — если его время уже прошло, придёт во время задачи.
+        val reminderChanged = before == null || before.reminderOffsetMin != task.reminderOffsetMin ||
+            before.time != task.time || before.startDate != task.startDate
+        reminders.schedule(id, lateFallback = reminderChanged)
         onChanged()
         return id
     }

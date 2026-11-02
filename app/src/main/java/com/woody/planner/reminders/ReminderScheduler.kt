@@ -32,8 +32,11 @@ class ReminderScheduler(
 
     val canScheduleExact: Boolean get() = alarmManager.canScheduleExactAlarms()
 
-    /** Ставит (или снимает) оба будильника задачи: напоминание и проверку «не выполнено». */
-    suspend fun schedule(taskId: Long) {
+    /**
+     * Ставит (или снимает) оба будильника задачи: напоминание и проверку «не выполнено».
+     * [lateFallback] — задачу только что сохранили: если время «за N минут» уже прошло, напомнить во время задачи.
+     */
+    suspend fun schedule(taskId: Long, lateFallback: Boolean = false) {
         val dao = taskDao()
         val task = dao.get(taskId)?.toDomain()
         val nudge = settings().missedNudgeMinutes.first()
@@ -46,7 +49,7 @@ class ReminderScheduler(
             dao.skipsOf(taskId).forEach { add(it.epochDay) }
         }
         val now = LocalDateTime.now()
-        val trigger = ReminderMath.nextTrigger(task, now) { it.toEpochDay() in handled }
+        val trigger = ReminderMath.nextTrigger(task, now, lateFallback) { it.toEpochDay() in handled }
         if (trigger == null) {
             alarmManager.cancel(firePendingIntent(taskId, null))
         } else {
@@ -66,8 +69,16 @@ class ReminderScheduler(
 
     private fun LocalDateTime.toMillis(): Long = atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
+    /**
+     * «Отложить»: свой будильник, отдельный от основного, — его не перезапишет перепланирование
+     * при запуске приложения или проверка «не выполнено».
+     */
     suspend fun snooze(taskId: Long, occurrence: LocalDate, minutes: Long) {
-        setAlarm(taskId, occurrence, System.currentTimeMillis() + minutes * 60_000L)
+        set(
+            System.currentTimeMillis() + minutes * 60_000L,
+            taskPendingIntent(ReminderReceiver.ACTION_SNOOZED, taskId, occurrence),
+            occurrence,
+        )
     }
 
     /** Пробное напоминание через [delayMs] — проверяет всю цепочку: будильник, приёмник, канал, звук. */
@@ -86,6 +97,7 @@ class ReminderScheduler(
     fun cancel(taskId: Long) {
         alarmManager.cancel(firePendingIntent(taskId, null))
         alarmManager.cancel(missedPendingIntent(taskId, null))
+        alarmManager.cancel(taskPendingIntent(ReminderReceiver.ACTION_SNOOZED, taskId, null))
     }
 
     private companion object {

@@ -39,7 +39,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        handleIntent(intent)
+        // После поворота или смены темы активность пересоздаётся с тем же интентом — не открываем
+        // редактор и день из уведомления второй раз.
+        if (savedInstanceState == null) handleIntent(intent)
         lifecycleScope.launch(Dispatchers.IO) {
             // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
             Notifications.ensureChannel(this@MainActivity, container.settings.language.first())
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleIntent(intent)
     }
 

@@ -64,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,6 +88,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.woody.planner.data.DraftSubtask
@@ -173,8 +175,9 @@ fun TaskEditorSheet(
     // Ввод обычным языком: «завтра в 18», «по понедельникам». Распознанное не записывается в черновик,
     // а накладывается поверх, пока фраза есть в названии: стёрли или дописали «в 5ке» — значение ушло.
     // Фраза подсвечивается и вырезается при сохранении; крестик на подсказке отменяет распознавание.
-    val initialTitle = remember(session) { draft?.title }
-    var dismissedQuick by remember(session) { mutableStateOf<String?>(null) }
+    // Переживают поворот экрана: иначе после пересоздания набранная фраза считалась бы «исходной» и не распознавалась.
+    val initialTitle = rememberSaveable(session) { draft?.title.orEmpty() }
+    var dismissedQuick by rememberSaveable(session) { mutableStateOf<String?>(null) }
     val base = shown
     val parsed = remember(base?.title, today) {
         base?.takeIf { it.title != initialTitle }?.let { QuickInput.parse(it.title, today) }
@@ -836,7 +839,8 @@ private fun RepeatPanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose
 
 @Composable
 private fun ChecklistPanel(draft: TaskDraft, onChange: (TaskDraft) -> Unit, onClose: () -> Unit) {
-    var nextKey by remember { mutableLongStateOf(-1L - draft.subtasks.size) }
+    // Ключи новых пунктов — меньше всех уже занятых: после удаления пункта и повторного открытия не совпадут.
+    var nextKey by remember { mutableLongStateOf(minOf(0L, draft.subtasks.minOfOrNull { it.key } ?: 0L) - 1L) }
     SubtaskEditor(
         subtasks = draft.subtasks,
         onChange = { onChange(draft.copy(subtasks = it)) },
@@ -1088,7 +1092,9 @@ private fun QuickChip(text: String, onDismiss: () -> Unit) {
             style = MaterialTheme.typography.labelLarge,
             color = colors.accent,
             maxLines = 1,
-            modifier = Modifier.padding(start = 8.dp, end = 2.dp),
+            overflow = TextOverflow.Ellipsis,
+            // Длинная подпись сжимается сама, а не вытесняет крестик.
+            modifier = Modifier.weight(1f, fill = false).padding(start = 8.dp, end = 2.dp),
         )
         Icon(
             WoodyIcons.Close,

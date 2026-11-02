@@ -1,5 +1,8 @@
 package com.woody.planner.ui.components
 
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -57,19 +60,23 @@ fun ProgressRing(done: Int, total: Int, modifier: Modifier = Modifier, size: Dp 
                 )
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            AnimatedContent(
-                targetState = done,
-                transitionSpec = {
-                    val up = targetState > initialState
-                    (slideInVertically(Motion.bouncy()) { if (up) it else -it } + fadeIn()) togetherWith
-                        (slideOutVertically(Motion.bouncy()) { if (up) -it else it } + fadeOut())
-                },
-                label = "done",
-            ) { value ->
-                Text("$value", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+        // Место внутри кольца не растёт с системным шрифтом — «12/15» на крупном шрифте не должно вылезать на кольцо.
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale = minOf(density.fontScale, 1f))) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AnimatedContent(
+                    targetState = done,
+                    transitionSpec = {
+                        val up = targetState > initialState
+                        (slideInVertically(Motion.bouncy()) { if (up) it else -it } + fadeIn()) togetherWith
+                            (slideOutVertically(Motion.bouncy()) { if (up) -it else it } + fadeOut())
+                    },
+                    label = "done",
+                ) { value ->
+                    Text("$value", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                }
+                Text("/$total", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             }
-            Text("/$total", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         }
     }
 }

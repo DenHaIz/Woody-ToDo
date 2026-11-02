@@ -35,6 +35,18 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
     private val _selected = MutableStateFlow(container.today.value)
     val selected: StateFlow<LocalDate> = _selected.asStateFlow()
 
+    init {
+        // Приложение пережило полночь: если был открыт «сегодня», переходим на новый «сегодня»,
+        // а не остаёмся на вчерашнем дне (и не создаём задачи на него).
+        viewModelScope.launch {
+            var previous = today.value
+            today.collect { now ->
+                if (now != previous && _selected.value == previous) _selected.value = now
+                previous = now
+            }
+        }
+    }
+
     private val _undo = MutableStateFlow<UndoEvent?>(null)
     val undo: StateFlow<UndoEvent?> = _undo.asStateFlow()
 

@@ -293,15 +293,43 @@ class ScreenshotTest {
     }
 
     /** Виджет на тёмных обоях: одна строка (как под поисковой строкой) и растянутый вверх. */
-    @OptIn(androidx.glance.ExperimentalGlanceApi::class)
     @Test
     fun widget() {
         seed()
-        val activity = compose.activity
-        listOf(
+        renderWidget(
             androidx.compose.ui.unit.DpSize(380.dp, 76.dp) to "widget_row",
+            androidx.compose.ui.unit.DpSize(340.dp, 84.dp) to "widget_phone",
             androidx.compose.ui.unit.DpSize(380.dp, 300.dp) to "widget_tall",
-        ).forEach { (size, name) ->
+        )
+    }
+
+    /** Название подбирается по длине: длинное — мельче и в две строки, слишком длинное — первые пять слов. */
+    @Test
+    fun widgetLongTitles() {
+        val first = runBlocking {
+            container.repository.save(
+                TaskDraft(title = "Позвонить маме и спросить про выходные", date = LocalDate.now(), time = java.time.LocalTime.of(0, 0)),
+            )
+        }
+        renderWidget(androidx.compose.ui.unit.DpSize(340.dp, 84.dp) to "widget_phone_long")
+        runBlocking {
+            // Первая выполнена — ближайшей становится вторая.
+            container.repository.setDone(first, LocalDate.now(), true)
+            container.repository.save(
+                TaskDraft(
+                    title = "Записаться к стоматологу на следующую неделю после обеда и уточнить цену",
+                    date = LocalDate.now(),
+                    time = java.time.LocalTime.of(0, 0),
+                ),
+            )
+        }
+        renderWidget(androidx.compose.ui.unit.DpSize(340.dp, 84.dp) to "widget_phone_longer")
+    }
+
+    @OptIn(androidx.glance.ExperimentalGlanceApi::class)
+    private fun renderWidget(vararg shots: Pair<androidx.compose.ui.unit.DpSize, String>) {
+        val activity = compose.activity
+        shots.forEach { (size, name) ->
             val views = runBlocking { com.woody.planner.widget.TodayWidget().compose(activity, size = size) }
             compose.runOnUiThread {
                 val density = activity.resources.displayMetrics.density

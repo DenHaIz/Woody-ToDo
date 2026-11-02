@@ -34,6 +34,13 @@ class QuickInputTest {
         assertEquals(LocalTime.of(12, 0), parse("обед в полдень")!!.time)
         // «в 5» без уточнения — вечер, а не 5 утра.
         assertEquals(LocalTime.of(17, 0), parse("забрать посылку в 5")!!.time)
+        // …но «утром в 6» — это утро.
+        assertEquals(LocalTime.of(6, 0), parse("пробежка утром в 6")!!.time)
+        assertEquals(LocalTime.of(5, 0), parse("run in the morning at 5")!!.time)
+        // После времени может идти день, а у времени с минутами — что угодно.
+        assertEquals(LocalTime.of(15, 0), parse("встреча в 3 завтра")!!.time)
+        assertEquals(LocalTime.of(18, 30), parse("в 18:30 встреча")!!.time)
+        assertEquals(LocalTime.of(19, 0), parse("в 7 вечера кино")!!.time)
     }
 
     @Test
@@ -87,9 +94,39 @@ class QuickInputTest {
         assertNull(parse("Купить курицу"))
         assertNull(parse("Купить 2 молока"))
         assertNull(parse("Зайти в 5ку за хлебом"))
+        assertNull(parse("Отжаться 30 минут"))
+        // Числа с существительным — не время и не дата.
+        assertNull(parse("Сделать в 2 этапа"))
+        assertNull(parse("Позвонить в 3 банка"))
+        assertNull(parse("Купить молоко 2.5%"))
+        assertNull(parse("Вода 1.5 л"))
+        assertNull(parse("Поздравить маму с днём рождения"))
         assertNull(parse("Прочитать «Мастера и Маргариту»"))
         assertNull(parse("Позвонить в банк"))
         assertNull(parse("Buy milk"))
         assertNull(parse(""))
+    }
+
+    @Test
+    fun relativeToNow() {
+        val now = LocalTime.of(14, 10, 37)
+        fun at(text: String) = QuickInput.parse(text, today, now)!!
+        assertEquals(LocalTime.of(14, 40), at("Выключить духовку через 30 минут").time)
+        assertEquals(today, at("Выключить духовку через 30 минут").date)
+        assertEquals("Выключить духовку", QuickInput.strip("Выключить духовку через 30 минут", at("Выключить духовку через 30 минут").spans))
+        assertEquals(LocalTime.of(16, 10), at("созвон через 2 часа").time)
+        assertEquals(LocalTime.of(15, 10), at("перезвонить через час").time)
+        assertEquals(LocalTime.of(14, 40), at("чай через полчаса").time)
+        assertEquals(LocalTime.of(14, 25), at("стирка +15 мин").time)
+        assertEquals(LocalTime.of(14, 55), at("call back in 45 minutes").time)
+        assertEquals(LocalTime.of(15, 10), at("check in an hour").time)
+        // Через полночь — уже завтра.
+        val late = QuickInput.parse("будильник через 3 часа", today, LocalTime.of(23, 0))!!
+        assertEquals(today.plusDays(1), late.date)
+        assertEquals(LocalTime.of(2, 0), late.time)
+        // «Через 2 дня» — дата, без времени.
+        val days = at("Оплатить счёт через 2 дня")
+        assertEquals(today.plusDays(2), days.date)
+        assertNull(days.time)
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +79,8 @@ fun TaskCard(
     // Длинное название, не влезшее в две строки, тоже раскрывается — целиком.
     var titleCut by remember(item.title) { mutableStateOf(false) }
     val expandable = item.subtasks.isNotEmpty() || item.note.isNotBlank() || titleCut
+    // Раскрывать стало нечего (сократили название, убрали заметку) — сворачиваем, иначе карточка застрянет раскрытой.
+    LaunchedEffect(expandable) { if (!expandable) expanded = false }
     // Раскрытая карточка занимает не больше ~3/4 экрана, остальное прокручивается внутри неё.
     val maxExpandedHeight = with(LocalDensity.current) { (LocalWindowInfo.current.containerSize.height * 0.74f).toDp() }
     val innerScroll = rememberScrollState()

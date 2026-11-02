@@ -143,6 +143,50 @@ class ReminderFlowTest {
         assertTrue(alarms.scheduledAlarms.isEmpty())
     }
 
+    @Test
+    fun snoozeSurvivesRescheduleOnAppStart() {
+        val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
+        val id = runBlocking {
+            app.container.repository.save(
+                TaskDraft(title = "Позвонить", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 10),
+            )
+        }
+        runBlocking {
+            app.container.reminders.snooze(id, at.toLocalDate(), minutes = 15)
+            // Запуск приложения перепланирует всё — отложенное напоминание должно остаться.
+            app.container.reminders.rescheduleAll()
+        }
+        assertEquals(2, alarms.scheduledAlarms.size)
+    }
+
+    @Test
+    fun doneOnNotificationOfDeletedTaskIsIgnored() {
+        val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
+        val id = runBlocking {
+            app.container.repository.save(TaskDraft(title = "Удалённая", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 0))
+        }
+        runBlocking { app.container.repository.delete(id) }
+        ReminderReceiver().onReceive(
+            app,
+            android.content.Intent(app, ReminderReceiver::class.java)
+                .setAction(ReminderReceiver.ACTION_DONE)
+                .putExtra(ReminderReceiver.EXTRA_TASK_ID, id)
+                .putExtra(ReminderReceiver.EXTRA_EPOCH_DAY, at.toLocalDate().toEpochDay()),
+        )
+        repeat(10) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }
+        assertTrue(runBlocking { app.container.database.taskDao().completionsOf(id) }.isEmpty())
+    }
+
+    @Test
+    fun reminderWhoseLeadTimePassedComesAtTaskTime() {
+        // До задачи 15 минут, напоминание «за 30» — уже поздно; придёт во время задачи.
+        val at = LocalDateTime.now().plusMinutes(15).withSecond(0).withNano(0)
+        runBlocking {
+            app.container.repository.save(TaskDraft(title = "Скоро", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 30))
+        }
+        assertEquals(at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), alarms.peekNextScheduledAlarm()!!.triggerAtTime)
+    }
+
     /** Приёмник работает в фоновой корутине (goAsync) — ждём результат, прокручивая главный поток. */
     private fun waitFor(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000

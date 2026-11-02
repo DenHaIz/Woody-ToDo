@@ -15,14 +15,23 @@ object ReminderMath {
      * Ближайшее будущее напоминание задачи.
      * [isHandled] — true, если вхождение на этот день уже выполнено или пропущено.
      */
-    fun nextTrigger(task: Task, now: LocalDateTime, isHandled: (LocalDate) -> Boolean): ReminderTrigger? {
+    fun nextTrigger(
+        task: Task,
+        now: LocalDateTime,
+        lateFallback: Boolean = false,
+        isHandled: (LocalDate) -> Boolean,
+    ): ReminderTrigger? {
         val offset = task.reminderOffsetMin ?: return null
         val time = task.time ?: DefaultTime
-        var day = RecurrenceRules.nextOccurrence(task.startDate, task.recurrence, now.toLocalDate())
+        // Со вчерашнего дня: проверка «не выполнено» у задачи в 23:50 приходится уже на завтра.
+        var day = RecurrenceRules.nextOccurrence(task.startDate, task.recurrence, now.toLocalDate().minusDays(1))
         var guard = 0
         while (day != null && guard++ < 1000) {
             val at = day.atTime(time).minusMinutes(offset.toLong())
             if (at.isAfter(now) && !isHandled(day)) return ReminderTrigger(day, at)
+            // Задачу только что сохранили, а «за 30 минут» уже прошло — напоминаем хотя бы во время задачи.
+            val start = day.atTime(time)
+            if (lateFallback && offset > 0 && start.isAfter(now) && !isHandled(day)) return ReminderTrigger(day, start)
             if (!task.recurrence.isRecurring) return null
             day = RecurrenceRules.nextOccurrence(task.startDate, task.recurrence, day.plusDays(1))
         }
@@ -35,6 +44,6 @@ object ReminderMath {
      */
     fun nextMissedCheck(task: Task, delayMin: Int, now: LocalDateTime, isHandled: (LocalDate) -> Boolean): ReminderTrigger? {
         if (delayMin <= 0 || task.time == null) return null
-        return nextTrigger(task.copy(reminderOffsetMin = -delayMin), now, isHandled)
+        return nextTrigger(task.copy(reminderOffsetMin = -delayMin), now, isHandled = isHandled)
     }
 }
