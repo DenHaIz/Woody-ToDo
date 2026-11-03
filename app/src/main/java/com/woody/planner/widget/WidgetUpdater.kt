@@ -102,7 +102,13 @@ object WidgetUpdater {
         val widgetIds = ids ?: manager.getAppWidgetIds(ComponentName(app, TodayWidgetReceiver::class.java))
         if (widgetIds.isEmpty()) return@withLock
         widgetIds.forEach { id ->
-            runCatching { manager.updateAppWidget(id, render(app, id, sizesOf(manager.getAppWidgetOptions(id)))) }
+            val sizes = sizesOf(manager.getAppWidgetOptions(id))
+            runCatching { manager.updateAppWidget(id, render(app, id, sizes)) }
+                .recoverCatching {
+                    // Запасной путь: один размер вместо набора — пусть мельче, но виджет не останется пустым.
+                    Log.w("Woody", "widget $id: sized views failed", it)
+                    manager.updateAppWidget(id, render(app, id, sizes.take(1)))
+                }
                 .onFailure { Log.w("Woody", "widget $id", it) }
         }
         scheduleMidnight(app)
@@ -154,18 +160,24 @@ object WidgetUpdater {
     }
 
     private val DefaultSize = DpSize(250.dp, 64.dp)
-    private const val LadderSteps = 4
+    private const val LadderSteps = 3
     /** Не больше 10 вариантов: каждый — отдельная отрисовка и место в памяти лаунчера. */
     private const val MaxSizes = 10
 
     /**
-     * Будильник без пробуждения (RTC): в полночь телефон не будится — виджет перерисуется,
-     * как только экран включат. Это ноль лишних пробуждений.
+     * Следующая перерисовка — в полночь (новый день) или через [RefreshEveryMs], что раньше. Будильник
+     * без пробуждения (RTC): спящий телефон не будится, виджет обновится, когда экран включат, — ноль лишних
+     * пробуждений. Частая перерисовка нужна прошивкам вроде vivo: они не пускают к «уснувшему» приложению
+     * обычные сигналы обновления, и пересозданный лаунчером виджет иначе оставался бы пустым до запуска приложения.
      */
     fun scheduleMidnight(context: Context) {
-        val at = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + 30_000
+        val now = System.currentTimeMillis()
+        val midnight = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + 30_000
+        val at = minOf(midnight, now + RefreshEveryMs)
         context.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC, at, midnightIntent(context))
     }
+
+    private const val RefreshEveryMs = 3 * 60 * 60 * 1000L
 
     fun cancelMidnight(context: Context) {
         context.getSystemService(AlarmManager::class.java).cancel(midnightIntent(context))

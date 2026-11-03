@@ -23,6 +23,24 @@ class WidgetTextTest {
     }
 
     @Test
+    fun oneOrTwoWordsAreBigInATallerWidget() {
+        // Однострочный виджет на телефоне владельца (~372×100 dp): место под название ~160×92.
+        val word = WidgetText.fit("Хлеб", 160f, 92f)
+        assertTrue("кегль ${word.size}", word.size >= 30f)
+        assertTrue(word.meta)
+        val two = WidgetText.fit("Забрать машину", 160f, 92f)
+        assertTrue("кегль ${two.size}", two.size >= 24f)
+        assertTrue(two.meta)
+    }
+
+    @Test
+    fun wordsAreSplitIntoBalancedLines() {
+        assertEquals(7, WidgetText.longestLine(listOf("Забрать", "машину"), 2))
+        assertEquals(14, WidgetText.longestLine(listOf("Забрать", "машину"), 1))
+        assertEquals(9, WidgetText.longestLine(listOf("Позвонить", "маме", "и", "спросить"), 3))
+    }
+
+    @Test
     fun longerTitleWrapsAndShrinks() {
         val short = WidgetText.fit("Забрать машину", width, height)
         val long = WidgetText.fit("Позвонить маме и спросить про выходные", width, height)

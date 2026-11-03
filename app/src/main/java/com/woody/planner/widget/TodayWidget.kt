@@ -118,14 +118,15 @@ private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm")
  */
 private class Metrics(size: DpSize, private val fontScale: Float) {
     val tall = size.height >= TodayWidget.Tall.height
-    val padH = if (tall) 16.dp else (size.height * 0.16f).coerceIn(10.dp, 18.dp)
-    val padV = if (tall) 14.dp else (size.height * 0.07f).coerceIn(3.dp, 10.dp)
+    val padH = if (tall) 16.dp else (size.height * 0.14f).coerceIn(10.dp, 16.dp)
+    val padV = if (tall) 14.dp else (size.height * 0.05f).coerceIn(3.dp, 8.dp)
     private val inner = size.height - padV * 2
 
     /** Кружок-счётчик и «+». */
-    val button = if (tall) 52.dp else (inner * 0.86f).coerceIn(36.dp, 84.dp)
-    val check = if (tall) 34.dp else button * 0.52f
-    val gap = (button * 0.2f).coerceIn(8.dp, 12.dp)
+    // Кнопки — заметные, но основное место — названию задачи.
+    val button = if (tall) 52.dp else (inner * 0.72f).coerceIn(36.dp, 72.dp)
+    val check = if (tall) 34.dp else button * 0.5f
+    val gap = (button * 0.16f).coerceIn(6.dp, 12.dp)
     val checkGap = gap * 0.7f
 
     /** Место под название ближайшей задачи в однострочном виджете. */
@@ -264,7 +265,8 @@ private fun TaskRow(item: TaskItem, palette: WidgetPalette, m: Metrics, height: 
             WidgetText.shorten(item.title),
             style = TextStyle(
                 color = if (item.done) palette.tertiary else palette.text,
-                fontSize = m.sp(17f),
+                // Строки выше — текст крупнее.
+                fontSize = m.sp((height.value * 0.4f).coerceIn(15f, 21f)),
                 textDecoration = if (item.done) TextDecoration.LineThrough else TextDecoration.None,
             ),
             maxLines = 1,

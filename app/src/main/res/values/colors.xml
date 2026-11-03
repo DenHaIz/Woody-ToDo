@@ -2,4 +2,7 @@
 <resources>
     <color name="ic_launcher_background">#FFF6E5</color>
     <color name="window_background">#F6F1E9</color>
+    <!-- Стартовый вид виджета (до первой отрисовки): как фон и текст виджета в светлой теме. -->
+    <color name="widget_initial_background">#E6F6F1E9</color>
+    <color name="widget_initial_text">#2B2A33</color>
 </resources>

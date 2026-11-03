@@ -160,6 +160,33 @@ class ReminderFlowTest {
     }
 
     @Test
+    fun snoozedReminderFiresAndPostsNotification() {
+        val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
+        val id = runBlocking {
+            app.container.repository.save(
+                TaskDraft(title = "Отложенная", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 10),
+            )
+        }
+        // Кнопка «Отложить» в уведомлении — как её нажимает пользователь.
+        ReminderReceiver().onReceive(
+            app,
+            android.content.Intent(app, ReminderReceiver::class.java)
+                .setAction(ReminderReceiver.ACTION_SNOOZE)
+                .putExtra(ReminderReceiver.EXTRA_TASK_ID, id)
+                .putExtra(ReminderReceiver.EXTRA_EPOCH_DAY, at.toLocalDate().toEpochDay()),
+        )
+        waitFor { alarms.scheduledAlarms.size == 2 }
+        val snoozed = alarms.scheduledAlarms.minBy { it.triggerAtTime }
+        val expected = System.currentTimeMillis() + 15 * 60_000L
+        assertTrue(kotlin.math.abs(snoozed.triggerAtTime - expected) < 60_000)
+        snoozed.operation!!.send()
+        waitFor { notifications.activeNotifications.isNotEmpty() }
+        val title = notifications.activeNotifications.single().notification.extras.getCharSequence("android.title").toString()
+        assertTrue(title, title.contains("Отложенная"))
+        notifications.cancelAll()
+    }
+
+    @Test
     fun doneOnNotificationOfDeletedTaskIsIgnored() {
         val at = LocalDateTime.now().plusMinutes(30).withSecond(0).withNano(0)
         val id = runBlocking {
