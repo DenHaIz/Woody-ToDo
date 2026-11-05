@@ -113,4 +113,21 @@ class WidgetTest {
         }
         assertTrue("задача не отмечена", done)
     }
+
+    @Test
+    fun tapOnYesterdaysWidgetOnlyRedrawsIt() {
+        // Виджет не обновился в полночь и показывает вчерашний список: нажатие не должно отметить задачу наугад.
+        val today = LocalDate.now()
+        val taskId = runBlocking { app.container.repository.save(TaskDraft(title = "Вчерашняя", date = today)) }
+        TodayWidgetReceiver().onReceive(
+            app,
+            Intent(WidgetUpdater.ACTION_TOGGLE)
+                .putExtra(WidgetUpdater.EXTRA_TASK_ID, taskId)
+                .putExtra(WidgetUpdater.EXTRA_DAY, today.toEpochDay())
+                .putExtra(WidgetUpdater.EXTRA_DONE, true)
+                .putExtra(WidgetUpdater.EXTRA_SHOWN_DAY, today.minusDays(1).toEpochDay()),
+        )
+        Thread.sleep(500)
+        assertTrue(runBlocking { app.container.database.taskDao().completionsOf(taskId) }.isEmpty())
+    }
 }

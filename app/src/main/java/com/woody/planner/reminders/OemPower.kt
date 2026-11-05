@@ -79,7 +79,10 @@ object OemPower {
             if (tryStart(context, miui)) return
         }
         if (vendor != Vendor.Other && vendor != Vendor.Samsung) {
-            // На остальных «агрессивных» прошивках ограничения батареи — в карточке приложения.
+            // Сначала системное «не оптимизировать» (от него зависит и сон, и «заморозка» на vivo),
+            // потом — карточка приложения, где у этих прошивок «Фоновое энергопотребление».
+            val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, "package:${context.packageName}".toUri())
+            if (!isBatteryUnrestricted(context) && tryStart(context, request)) return
             openAppDetails(context)
             return
         }

@@ -42,6 +42,7 @@ class SettingsRepository(private val context: Context) {
     private val missedNudgeKey = intPreferencesKey("missed_nudge_minutes")
     private val defaultReminderKey = intPreferencesKey("default_reminder_minutes")
     private val dynamicColorsKey = booleanPreferencesKey("dynamic_colors")
+    private val pinnedKey = booleanPreferencesKey("pinned_notification")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
         prefs[themeKey]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.System
@@ -75,6 +76,16 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setDefaultReminderMinutes(minutes: Int?) {
         context.dataStore.edit { it[defaultReminderKey] = minutes ?: -1 }
+    }
+
+    /**
+     * Постоянное уведомление с планом дня. Держит процесс живым, чтобы прошивки (vivo, Xiaomi) не «замораживали»
+     * приложение и доставляли напоминания и обновления виджета вовремя. По умолчанию выключено.
+     */
+    val pinnedNotification: Flow<Boolean> = context.dataStore.data.map { it[pinnedKey] ?: false }
+
+    suspend fun setPinnedNotification(enabled: Boolean) {
+        context.dataStore.edit { it[pinnedKey] = enabled }
     }
 
     /** Цвета Material You (из обоев) вместо фирменных цветов Woody. По умолчанию — фирменные. */

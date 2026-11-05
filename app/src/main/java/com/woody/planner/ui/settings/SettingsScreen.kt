@@ -97,6 +97,7 @@ import com.woody.planner.data.ThemeMode
 import com.woody.planner.domain.Category
 import com.woody.planner.reminders.Notifications
 import com.woody.planner.reminders.OemPower
+import com.woody.planner.reminders.PinnedService
 import com.woody.planner.ui.editor.ReminderOptions
 import com.woody.planner.ui.editor.reminderLabel
 import com.woody.planner.widget.WidgetUpdater
@@ -287,6 +288,7 @@ private fun SettingsContent(
     val alarmClock by container.settings.alarmClockReminders.collectAsStateWithLifecycle(true)
     val missedNudge by container.settings.missedNudgeMinutes.collectAsStateWithLifecycle(0)
     val defaultReminder by container.settings.defaultReminderMinutes.collectAsStateWithLifecycle(null)
+    val pinned by container.settings.pinnedNotification.collectAsStateWithLifecycle(false)
     // Как и у «Если не выполнено»: при повторном включении возвращается последний выбор.
     var reminderChoice by rememberSaveable { mutableIntStateOf(ReminderOptions[1]) }
     LaunchedEffect(defaultReminder) { defaultReminder?.let { reminderChoice = it } }
@@ -298,7 +300,8 @@ private fun SettingsContent(
     var nudgeChoice by rememberSaveable { mutableIntStateOf(NudgeOptions[1]) }
     LaunchedEffect(missedNudge) { if (missedNudge > 0) nudgeChoice = missedNudge }
     val setNudge: (Int) -> Unit = { minutes ->
-        scope.launch {
+        // В области приложения: уйдёте с экрана — перепланирование всё равно доделается.
+        container.scope.launch {
             container.settings.setMissedNudgeMinutes(minutes)
             container.reminders.rescheduleAll()
         }
@@ -540,7 +543,7 @@ private fun SettingsContent(
                     },
                     checked = alarmClock,
                     onChange = { enabled ->
-                        scope.launch {
+                        container.scope.launch {
                             container.settings.setAlarmClockReminders(enabled)
                             container.reminders.rescheduleAll()
                         }
@@ -612,6 +615,21 @@ private fun SettingsContent(
                     action = tr("Открыть", "Open"),
                     onAction = { OemPower.openBatterySettings(context) },
                 )
+                Spacer(Modifier.height(12.dp))
+                ToggleRow(
+                    title = tr("Постоянное уведомление", "Persistent notification"),
+                    status = if (pinned) {
+                        tr("План дня в шторке · телефон не усыпляет напоминания и виджет", "Today's plan in the shade · the phone won't put reminders and the widget to sleep")
+                    } else {
+                        tr("Если напоминания приходят не всегда или виджет не обновляется", "If reminders don't always arrive or the widget doesn't update")
+                    },
+                    checked = pinned,
+                    onChange = { enabled ->
+                        container.scope.launch { container.settings.setPinnedNotification(enabled) }
+                        PinnedService.apply(context.applicationContext, enabled)
+                        if (enabled && !notificationsAllowed) onRequestNotifications()
+                    },
+                )
                 Spacer(Modifier.height(14.dp))
                 TestReminderButton(
                     secondsLeft = testLeft,
@@ -644,13 +662,14 @@ private fun SettingsContent(
             SettingsCard(tr("Батарея", "Battery")) {
                 Text(
                     tr(
-                        "Woody ничего не делает в фоне: нет служб, синхронизации и периодических проверок. " +
+                        "Woody ничего не делает в фоне: нет синхронизации и периодических проверок. " +
                             "На каждое напоминание ставится один системный будильник — телефон просыпается " +
-                            "на долю секунды только в нужную минуту. Так напоминания приходят вовремя, " +
-                            "а расход заряда остаётся незаметным.",
-                        "Woody does nothing in the background: no services, sync or periodic checks. " +
+                            "на долю секунды только в нужную минуту. Постоянное уведомление тоже не работает " +
+                            "в фоне: оно лишь не даёт прошивке усыпить Woody. Расход заряда остаётся незаметным.",
+                        "Woody does nothing in the background: no sync or periodic checks. " +
                             "Each reminder sets a single system alarm — the phone wakes for a split second " +
-                            "only at the right minute. Reminders arrive on time and the battery use is negligible.",
+                            "only at the right minute. The persistent notification doesn't run anything either: " +
+                            "it only keeps the phone from putting Woody to sleep. Battery use stays negligible.",
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary,

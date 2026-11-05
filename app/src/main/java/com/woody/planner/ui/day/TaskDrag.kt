@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -90,6 +91,12 @@ class TaskDragState {
 
 val LocalTaskDrag = staticCompositionLocalOf<TaskDragState?> { null }
 
+private class CoordsHolder {
+    var coords: LayoutCoordinates? = null
+
+    fun origin(): Offset = coords?.takeIf { it.isAttached }?.positionInRoot() ?: Offset.Zero
+}
+
 /**
  * Жест на карточке. [onMove] — палец сдвинулся (для перестановки в списке), [onDrop] — отпустили
  * после перетаскивания (вернуть true, если задача перенесена на другой день), [onEdit] — удержали
@@ -110,22 +117,18 @@ fun Modifier.taskDrag(
     val drop by rememberUpdatedState(onDrop)
     val edit by rememberUpdatedState(onEdit)
     val current by rememberUpdatedState(item)
-    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var top by remember { mutableFloatStateOf(0f) }
-    var left by remember { mutableFloatStateOf(0f) }
+    // Координаты карточки — простой держатель, не состояние: при прокрутке списка он обновляется каждый кадр,
+    // и запись в состояние у всех видимых карточек стоила бы лишней работы. Положение считаем, только когда тащат.
+    val holder = remember { CoordsHolder() }
     // Мягкое возвращение на место после отпускания.
     val settle = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
     val lifted = remember { Animatable(0f) }
     val dragging = state.isDragging(item)
+    val elevated by remember { derivedStateOf { lifted.value > 0f } }
 
     return this
-        .zIndex(if (dragging || lifted.value > 0f) 1f else 0f)
-        .onGloballyPositioned {
-            coords = it
-            val p = it.positionInRoot()
-            top = p.y
-            left = p.x
-        }
+        .zIndex(if (dragging || elevated) 1f else 0f)
+        .onGloballyPositioned { holder.coords = it }
         // Жест — до сдвига карточки: координаты пальца считаются в несдвинутой системе.
         .pointerInput(item.taskId, item.day, enabled) {
             awaitEachGesture {
@@ -143,7 +146,7 @@ fun Modifier.taskDrag(
                     }
                     return@awaitEachGesture
                 }
-                val c = coords ?: return@awaitEachGesture
+                val c = holder.coords ?: return@awaitEachGesture
                 haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 val startRoot = c.localToRoot(long.position)
                 state.start(current, startRoot, long.position)
@@ -159,7 +162,7 @@ fun Modifier.taskDrag(
                     val change = event.changes.firstOrNull { it.id == long.id } ?: break
                     event.changes.forEach { it.consume() }
                     if (!change.pressed) break
-                    val root = coords?.localToRoot(change.position) ?: break
+                    val root = holder.coords?.localToRoot(change.position) ?: break
                     travelled += (root - state.pointer).getDistance()
                     state.move(root)
                     val day = state.hoverDay
@@ -172,7 +175,8 @@ fun Modifier.taskDrag(
                 val wasMoved = travelled > viewConfiguration.touchSlop
                 val target = state.hoverDay
                 // Остаток сдвига — в пружину возврата, чтобы карточка доплыла на место, а не прыгнула.
-                val rest = Offset(state.pointer.x - state.grab.x - left, state.pointer.y - state.grab.y - top)
+                val origin = holder.origin()
+                val rest = Offset(state.pointer.x - state.grab.x - origin.x, state.pointer.y - state.grab.y - origin.y)
                 state.end()
                 scope.launch {
                     settle.snapTo(rest)
@@ -184,7 +188,8 @@ fun Modifier.taskDrag(
         }
         .graphicsLayer {
             val live = if (state.isDragging(current) && state.pointer != Offset.Unspecified) {
-                Offset(state.pointer.x - state.grab.x - left, state.pointer.y - state.grab.y - top)
+                val origin = holder.origin()
+                Offset(state.pointer.x - state.grab.x - origin.x, state.pointer.y - state.grab.y - origin.y)
             } else {
                 settle.value
             }

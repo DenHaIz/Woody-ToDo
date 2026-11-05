@@ -68,6 +68,7 @@ class EditorViewModel(private val container: AppContainer) : ViewModel() {
     fun save(draft: TaskDraft) {
         if (draft.title.isBlank()) return
         close()
-        viewModelScope.launch { repository.save(draft) }
+        // В области приложения: «Сохранить» и сразу «Назад» не должны отменить запись.
+        container.scope.launch { repository.save(draft) }
     }
 }

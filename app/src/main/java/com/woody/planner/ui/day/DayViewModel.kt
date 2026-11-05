@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -50,14 +52,20 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
     private val _undo = MutableStateFlow<UndoEvent?>(null)
     val undo: StateFlow<UndoEvent?> = _undo.asStateFlow()
 
-    /** Цвета категорий выбранного дня — для фонового градиента. */
-    val ambientColors: StateFlow<List<Int>> = combine(_selected, today) { day, t -> day to t }
+    /** План выбранного дня — один поток и для шапки (кольцо прогресса), и для фона. */
+    val selectedAgenda: StateFlow<DayAgenda?> = combine(_selected, today) { day, t -> day to t }
         .flatMapLatest { (day, t) -> repository.observeDay(day, t) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Цвета категорий выбранного дня — для фонового градиента. */
+    val ambientColors: StateFlow<List<Int>> = selectedAgenda
+        .filterNotNull()
         .map { agenda ->
             (agenda.overdue + agenda.timed + agenda.untimed + agenda.done)
                 .mapNotNull { it.category?.colorArgb }
                 .distinct()
         }
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun select(day: LocalDate) {
@@ -68,16 +76,16 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
 
     fun summaries(from: LocalDate, days: Int): Flow<List<DaySummary>> = repository.observeRange(from, days)
 
-    fun toggleDone(item: TaskItem) = viewModelScope.launch {
+    fun toggleDone(item: TaskItem) = container.scope.launch {
         repository.setDone(item.taskId, item.day, !item.done)
     }
 
-    fun toggleSubtask(item: TaskItem, subtask: SubtaskItem) = viewModelScope.launch {
+    fun toggleSubtask(item: TaskItem, subtask: SubtaskItem) = container.scope.launch {
         repository.setSubtaskDone(subtask.id, item.day, !subtask.done)
     }
 
     /** Свайп влево: разовую задачу — на завтра (просроченную — на сегодня), повторяющуюся — пропустить. */
-    fun postpone(item: TaskItem) = viewModelScope.launch {
+    fun postpone(item: TaskItem) = container.scope.launch {
         if (item.isRecurring) {
             repository.setSkipped(item.taskId, item.day, skipped = true)
             offerUndo({ it.pick("Пропущено: ", "Skipped: ") + item.title }) { repository.setSkipped(item.taskId, item.day, skipped = false) }
@@ -92,15 +100,15 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /** Перетащили на день в ленте недели. */
-    fun moveToDay(item: TaskItem, day: LocalDate) = viewModelScope.launch {
+    fun moveToDay(item: TaskItem, day: LocalDate) = container.scope.launch {
         repository.moveTo(item.taskId, day)
         offerUndo({ lang -> lang.pick("Перенесено на ", "Moved to ") + lang.dayMonth(day) }) { repository.moveTo(item.taskId, item.day) }
     }
 
     /** Новый порядок задач без времени. */
-    fun reorder(ids: List<Long>) = viewModelScope.launch { repository.reorder(ids) }
+    fun reorder(ids: List<Long>) = container.scope.launch { repository.reorder(ids) }
 
-    fun delete(taskId: Long) = viewModelScope.launch {
+    fun delete(taskId: Long) = container.scope.launch {
         val deleted = repository.delete(taskId) ?: return@launch
         offerUndo({ it.pick("Удалено: ", "Deleted: ") + deleted.title }) { repository.restore(deleted) }
     }
@@ -108,7 +116,7 @@ class DayViewModel(private val container: AppContainer) : ViewModel() {
     fun performUndo() {
         val event = _undo.value ?: return
         _undo.value = null
-        viewModelScope.launch { event.undo() }
+        container.scope.launch { event.undo() }
     }
 
     fun dismissUndo(id: Long) {

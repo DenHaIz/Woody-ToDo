@@ -56,6 +56,17 @@ interface TaskDao {
     )
     fun observeOverdue(today: Long): Flow<List<TaskEntity>>
 
+    /** Отметки пунктов чек-листа у просроченных разовых задач — они стоят на исходный день задачи. */
+    @Query(
+        """
+        SELECT sc.* FROM subtask_checks sc
+        JOIN subtasks s ON s.id = sc.subtaskId
+        JOIN tasks t ON t.id = s.taskId
+        WHERE t.recurrenceType = 'NONE' AND t.startDate < :today AND sc.epochDay = t.startDate
+        """,
+    )
+    fun observeOverdueSubtaskChecks(today: Long): Flow<List<SubtaskCheckEntity>>
+
     @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM tasks")
     suspend fun maxSortOrder(): Int
 

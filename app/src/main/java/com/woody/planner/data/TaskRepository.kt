@@ -8,15 +8,21 @@ import com.woody.planner.domain.DayAgenda
 import com.woody.planner.domain.DayKey
 import com.woody.planner.domain.DaySummary
 import com.woody.planner.domain.Recurrence
+import com.woody.planner.domain.Subtask
 import com.woody.planner.domain.Task
 import com.woody.planner.reminders.ReminderScheduler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -74,37 +80,69 @@ class TaskRepository(
         categoryDao.observeTaskCounts().map { list -> list.associate { it.categoryId to it.count } }
 
     fun observeDay(day: LocalDate, today: LocalDate): Flow<DayAgenda> =
-        observeSnapshot(day, day, withOverdueFor = today.takeIf { it == day })
+        observeSnapshot(day, day, withOverdueFor = today.takeIf { it == day }, base = sharedBase)
             .map { AgendaBuilder.build(it, day, today) }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
 
+    /**
+     * План дня одним чтением — для виджета и уведомления. Читает базу заново, а не общий поток экрана:
+     * тот мог ещё не получить только что записанное изменение.
+     */
+    suspend fun loadDay(day: LocalDate, today: LocalDate): DayAgenda =
+        AgendaBuilder.build(observeSnapshot(day, day, withOverdueFor = today.takeIf { it == day }, base = freshBase()).first(), day, today)
+
     fun observeRange(from: LocalDate, days: Int): Flow<List<DaySummary>> =
-        observeSnapshot(from, from.plusDays(days - 1L), withOverdueFor = null)
+        observeSnapshot(from, from.plusDays(days - 1L), withOverdueFor = null, base = sharedBase)
             .map { snapshot -> List(days) { AgendaBuilder.summary(snapshot, from.plusDays(it.toLong())) } }
             .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
 
-    private fun observeSnapshot(from: LocalDate, to: LocalDate, withOverdueFor: LocalDate?): Flow<AgendaSnapshot> {
-        val f = from.toEpochDay()
-        val t = to.toEpochDay()
-        val base = combine(tasks.observeAll(), categoryDao.observeAll(), tasks.observeSubtasks()) { tasks, cats, subs ->
-            Triple(
+    private class Base(val tasks: List<Task>, val categories: Map<Long, Category>, val subtasks: Map<Long, List<Subtask>>)
+
+    private fun freshBase(): Flow<Base> =
+        combine(tasks.observeAll(), categoryDao.observeAll(), tasks.observeSubtasks()) { tasks, cats, subs ->
+            Base(
                 tasks.map { it.toDomain() },
                 cats.associate { it.id to it.toDomain() },
                 subs.groupBy({ it.taskId }, { it.toDomain() }),
             )
         }
+
+    /**
+     * Все задачи, категории и пункты чек-листов — одно чтение на весь экран: им пользуются страницы дней,
+     * шапка, фон, лента недели и календарь. Раньше каждый перечитывал все таблицы сам после любого изменения.
+     * Перестаёт слушать базу через 5 с после того, как экран закрыли, и тогда же забывает данные.
+     */
+    private val sharedBase: Flow<Base> = freshBase()
+        .flowOn(Dispatchers.Default)
+        .shareIn(
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000, replayExpirationMillis = 0),
+            replay = 1,
+        )
+
+    private fun observeSnapshot(from: LocalDate, to: LocalDate, withOverdueFor: LocalDate?, base: Flow<Base>): Flow<AgendaSnapshot> {
+        val f = from.toEpochDay()
+        val t = to.toEpochDay()
         val overdue: Flow<List<Task>> = withOverdueFor
             ?.let { day -> tasks.observeOverdue(day.toEpochDay()).map { list -> list.map { it.toDomain() } } }
             ?: flowOf(emptyList())
+        val overdueChecks = withOverdueFor
+            ?.let { day -> tasks.observeOverdueSubtaskChecks(day.toEpochDay()) }
+            ?: flowOf(emptyList())
+        // Отметки пунктов просроченных задач — на их исходный день, вне диапазона [from, to].
+        val checks = combine(tasks.observeSubtaskChecks(f, t), overdueChecks) { a, b -> if (b.isEmpty()) a else a + b }
         return combine(
             base,
             tasks.observeCompletions(f, t),
             tasks.observeSkips(f, t),
-            tasks.observeSubtaskChecks(f, t),
+            checks,
             overdue,
-        ) { (taskList, cats, subs), completions, skips, checks, overdueList ->
+        ) { base, completions, skips, checks, overdueList ->
+            val taskList = base.tasks
+            val cats = base.categories
+            val subs = base.subtasks
             AgendaSnapshot(
                 tasks = taskList,
                 categories = cats,
@@ -232,10 +270,11 @@ class TaskRepository(
             .filter { it.title.isNotBlank() }
             .mapIndexed { index, s -> SubtaskEntity(id = s.id, taskId = draft.id, title = s.title.trim(), sortOrder = index) }
         val id = tasks.save(task.toEntity(), subtasks)
-        // Напоминание только что поставили или поменяли — если его время уже прошло, придёт во время задачи.
-        val reminderChanged = before == null || before.reminderOffsetMin != task.reminderOffsetMin ||
-            before.time != task.time || before.startDate != task.startDate
-        reminders.schedule(id, lateFallback = reminderChanged)
+        // Время или напоминание поменяли — о сегодняшнем дне можно напомнить снова (по новому времени).
+        val reminderChanged = before != null && (before.reminderOffsetMin != task.reminderOffsetMin ||
+            before.time != task.time || before.startDate != task.startDate)
+        if (reminderChanged) reminders.forgetShown(id)
+        reminders.schedule(id)
         onChanged()
         return id
     }

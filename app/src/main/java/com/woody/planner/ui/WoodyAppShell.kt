@@ -88,9 +88,6 @@ fun WoodyAppShell(
     val editorVm: EditorViewModel = viewModel { EditorViewModel(container) }
     val categoriesVm: CategoriesViewModel = viewModel { CategoriesViewModel(container) }
 
-    val draft by editorVm.draft.collectAsStateWithLifecycle()
-    val editorSession by editorVm.session.collectAsStateWithLifecycle()
-    val categories by editorVm.categories.collectAsStateWithLifecycle()
     val selectedDay by dayVm.selected.collectAsStateWithLifecycle()
     val today by dayVm.today.collectAsStateWithLifecycle()
     val ambient by dayVm.ambientColors.collectAsStateWithLifecycle()
@@ -160,8 +157,10 @@ fun WoodyAppShell(
 
     CompositionLocalProvider(LocalHazeState provides hazeState, LocalSwipeStyle provides swipeStyle) {
         Box(Modifier.fillMaxSize()) {
+            // Тот же список, пока цвета не поменялись: фон (он же источник размытия стекла) не перерисовывается зря.
+            val ambientColors = remember(ambient) { ambient.map { Color(it) } }
             AmbientBackground(
-                colors = ambient.map { Color(it) },
+                colors = ambientColors,
                 seed = selectedDay.toEpochDay(),
                 modifier = Modifier
                     .fillMaxSize()
@@ -202,14 +201,9 @@ fun WoodyAppShell(
                     .navigationBarsPadding(),
             )
 
-            TaskEditorSheet(
-                draft = draft,
-                session = editorSession,
-                categories = categories,
+            EditorHost(
+                editorVm = editorVm,
                 today = today,
-                onChange = editorVm::update,
-                onDismiss = editorVm::close,
-                onSave = editorVm::save,
                 onDelete = { id ->
                     editorVm.close()
                     dayVm.delete(id)
@@ -279,4 +273,31 @@ private fun MessageBar(message: Message?, onTimeout: (Long) -> Unit, modifier: M
             }
         }
     }
+}
+
+/**
+ * Редактор со своей подпиской на черновик: каждая буква пересобирает только его, а не весь экран
+ * (раньше вместе с ним перерисовывался фон под стеклом и пересчитывалось размытие).
+ */
+@Composable
+private fun EditorHost(
+    editorVm: EditorViewModel,
+    today: LocalDate,
+    onDelete: (Long) -> Unit,
+    onReminderEnabled: () -> Unit,
+) {
+    val draft by editorVm.draft.collectAsStateWithLifecycle()
+    val session by editorVm.session.collectAsStateWithLifecycle()
+    val categories by editorVm.categories.collectAsStateWithLifecycle()
+    TaskEditorSheet(
+        draft = draft,
+        session = session,
+        categories = categories,
+        today = today,
+        onChange = editorVm::update,
+        onDismiss = editorVm::close,
+        onSave = editorVm::save,
+        onDelete = onDelete,
+        onReminderEnabled = onReminderEnabled,
+    )
 }

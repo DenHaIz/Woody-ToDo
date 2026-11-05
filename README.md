@@ -9,9 +9,9 @@
   <img src="docs/widget.png" width="480" alt="Виджет">
 </p>
 
-**RU** — Простой ежедневник для Android: задачи на день, повторы, чек-листы и напоминания, виджет на рабочий стол. Пишите как говорите — «купить хлеб завтра в 18». Плавные анимации, эффект стекла, цвета Material You, не тратит батарею в фоне. Android 12+.
+**RU** — Простой ежедневник для Android: задачи на день, повторы, чек-листы и напоминания, виджет на рабочий стол. Пишите как говорите — «купить хлеб завтра в 18». Плавные анимации, эффект стекла, цвета Material You, не тратит батарею в фоне. Если телефон «усыпляет» напоминания (vivo, Xiaomi) — включите в настройках «Постоянное уведомление». Android 12+.
 
-**EN** — A simple daily planner for Android: daily tasks, repeats, checklists, reminders and a home-screen widget. Type naturally — "buy bread tomorrow at 6pm". Smooth animations, glass effect, Material You colors, no battery drain in the background. Android 12+.
+**EN** — A simple daily planner for Android: daily tasks, repeats, checklists, reminders and a home-screen widget. Type naturally — "buy bread tomorrow at 6pm". Smooth animations, glass effect, Material You colors, no battery drain in the background. If your phone puts reminders to sleep (vivo, Xiaomi), turn on "Persistent notification" in settings. Android 12+.
 
 ## Установка / Install
 

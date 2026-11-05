@@ -214,6 +214,62 @@ class ReminderFlowTest {
         assertEquals(at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), alarms.peekNextScheduledAlarm()!!.triggerAtTime)
     }
 
+    @Test
+    fun droppedReminderIsShownLateAndOnlyOnce() {
+        val at = LocalDateTime.now().plusMinutes(40).withSecond(0).withNano(0)
+        val day = at.toLocalDate()
+        val id = runBlocking {
+            app.container.repository.save(TaskDraft(title = "Потерянное", date = day, time = at.toLocalTime(), reminderOffsetMin = 10))
+        }
+        val original = alarms.peekNextScheduledAlarm()!!
+        // Прошивка «заморозила» приложение, и будильник пять минут назад так и не пришёл.
+        app.getSharedPreferences("reminder_alarms", android.content.Context.MODE_PRIVATE).edit()
+            .putString("${ReminderReceiver.ACTION_FIRE}|$id", "${System.currentTimeMillis() - 5 * 60_000},${day.toEpochDay()}")
+            .commit()
+        // Процесс проснулся (разблокировка, виджет, запуск) — напоминание показано с опозданием.
+        runBlocking { app.container.reminders.catchUp() }
+        waitFor { notifications.activeNotifications.isNotEmpty() }
+        assertEquals("Потерянное", notifications.activeNotifications.single().notification.extras.getString("android.title"))
+        notifications.cancelAll()
+
+        // Придержанный будильник всё-таки доставили — второго уведомления нет.
+        original.operation!!.send()
+        repeat(10) { shadowOf(Looper.getMainLooper()).idle(); Thread.sleep(20) }
+        assertTrue(notifications.activeNotifications.isEmpty())
+    }
+
+    @Test
+    fun lateFallbackSurvivesReschedule() {
+        // «За 30 минут» уже прошло — напоминание во время задачи не пропадает после перезапуска приложения.
+        val at = LocalDateTime.now().plusMinutes(15).withSecond(0).withNano(0)
+        runBlocking {
+            app.container.repository.save(TaskDraft(title = "Скоро", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 30))
+            app.container.reminders.rescheduleAll()
+        }
+        assertEquals(at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), alarms.peekNextScheduledAlarm()!!.triggerAtTime)
+    }
+
+    @Test
+    fun movingTaskLaterRemindsAgainTheSameDay() {
+        val at = LocalDateTime.now().plusMinutes(5).withSecond(0).withNano(0)
+        val id = runBlocking {
+            app.container.repository.save(TaskDraft(title = "Перенесённая", date = at.toLocalDate(), time = at.toLocalTime(), reminderOffsetMin = 0))
+        }
+        alarms.peekNextScheduledAlarm()!!.operation!!.send()
+        waitFor { notifications.activeNotifications.isNotEmpty() }
+        notifications.cancelAll()
+        // Напоминание пришло, задачу передвинули на два часа позже — напомнит и в новое время.
+        val later = at.plusHours(2)
+        runBlocking {
+            val task = app.container.database.taskDao().get(id)!!
+            app.container.repository.save(
+                TaskDraft(id = id, title = task.title, date = later.toLocalDate(), time = later.toLocalTime(), reminderOffsetMin = 0, createdAt = task.createdAt),
+            )
+        }
+        waitFor { alarms.scheduledAlarms.isNotEmpty() }
+        assertEquals(later.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), alarms.peekNextScheduledAlarm()!!.triggerAtTime)
+    }
+
     /** Приёмник работает в фоновой корутине (goAsync) — ждём результат, прокручивая главный поток. */
     private fun waitFor(condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + 5_000

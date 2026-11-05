@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.compose
 import com.woody.planner.WoodyApp
+import com.woody.planner.reminders.PinnedService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,12 +35,20 @@ class TodayWidgetReceiver : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            WidgetUpdater.ACTION_MIDNIGHT -> async { WidgetUpdater.updateNow(context) }
+            WidgetUpdater.ACTION_MIDNIGHT -> async {
+                WidgetUpdater.updateNow(context)
+                WidgetUpdater.wakeUp(context)
+            }
             WidgetUpdater.ACTION_TOGGLE -> async {
                 val taskId = intent.getLongExtra(WidgetUpdater.EXTRA_TASK_ID, -1).takeIf { it > 0 } ?: return@async
                 val day = LocalDate.ofEpochDay(intent.getLongExtra(WidgetUpdater.EXTRA_DAY, LocalDate.now().toEpochDay()))
                 val done = intent.getBooleanExtra(WidgetUpdater.EXTRA_DONE, true)
-                (context.applicationContext as WoodyApp).container.repository.setDone(taskId, day, done)
+                // Виджет нарисован вчера (прошивка не дала обновить его в полночь) — кружок относится к вчерашнему
+                // списку. Не отмечаем наугад: показываем сегодняшний список, пусть нажмут ещё раз.
+                val shownDay = intent.getLongExtra(WidgetUpdater.EXTRA_SHOWN_DAY, LocalDate.now().toEpochDay())
+                if (shownDay == LocalDate.now().toEpochDay()) {
+                    (context.applicationContext as WoodyApp).container.repository.setDone(taskId, day, done)
+                }
                 WidgetUpdater.updateNow(context)
             }
             else -> super.onReceive(context, intent)
@@ -47,7 +56,12 @@ class TodayWidgetReceiver : AppWidgetProvider() {
     }
 
     override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        async { WidgetUpdater.updateNow(context, appWidgetIds) }
+        async {
+            WidgetUpdater.updateNow(context, appWidgetIds)
+            // Система будит виджет раз в час (updatePeriodMillis) — заодно доставляем напоминания,
+            // которые прошивка могла придержать.
+            WidgetUpdater.wakeUp(context)
+        }
     }
 
     override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: Bundle) {
@@ -86,6 +100,8 @@ object WidgetUpdater {
     const val EXTRA_TASK_ID = "task_id"
     const val EXTRA_DAY = "epoch_day"
     const val EXTRA_DONE = "done"
+    /** День, на который нарисован виджет, — чтобы не отметить задачу во «вчерашнем» виджете. */
+    const val EXTRA_SHOWN_DAY = "shown_day"
 
     internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Mutex()
@@ -95,12 +111,42 @@ object WidgetUpdater {
         scope.launch { runCatching { updateNow(app) } }
     }
 
+    /** Виджет показывает не сегодняшний день (или ещё ни разу не рисовался в этой версии). */
+    fun isStale(context: Context): Boolean =
+        prefs(context).getLong(KeyDay, Long.MIN_VALUE) != LocalDate.now().toEpochDay()
+
+    /** Перерисовать, только если виджет устарел: дёшево, можно звать при каждом запуске процесса и разблокировке. */
+    fun refreshIfStale(context: Context) {
+        val app = context.applicationContext
+        scope.launch {
+            runCatching { if (isStale(app) && hasWidgets(app)) updateNow(app) }
+        }
+    }
+
+    private fun hasWidgets(context: Context): Boolean =
+        AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, TodayWidgetReceiver::class.java)).isNotEmpty()
+
+    /**
+     * Процесс разбудили по расписанию: доставить напоминания, которые прошивка могла придержать,
+     * и при необходимости вернуть постоянное уведомление.
+     */
+    internal suspend fun wakeUp(context: Context) {
+        (context.applicationContext as WoodyApp).container.reminders.catchUp()
+        PinnedService.ensure(context)
+    }
+
+    private fun prefs(context: Context) = context.getSharedPreferences("widget", Context.MODE_PRIVATE)
+    private const val KeyDay = "shown_day"
+
     /** Перерисовать виджеты [ids] (по умолчанию — все) под их текущий размер. */
     suspend fun updateNow(context: Context, ids: IntArray? = null) = lock.withLock {
         val app = context.applicationContext
         val manager = AppWidgetManager.getInstance(app)
+        // То же «сегодня» — в постоянном уведомлении, если оно включено.
+        PinnedService.refresh(app)
         val widgetIds = ids ?: manager.getAppWidgetIds(ComponentName(app, TodayWidgetReceiver::class.java))
         if (widgetIds.isEmpty()) return@withLock
+        val today = LocalDate.now().toEpochDay()
         widgetIds.forEach { id ->
             val sizes = sizesOf(manager.getAppWidgetOptions(id))
             runCatching { manager.updateAppWidget(id, render(app, id, sizes)) }
@@ -111,6 +157,7 @@ object WidgetUpdater {
                 }
                 .onFailure { Log.w("Woody", "widget $id", it) }
         }
+        prefs(app).edit().putLong(KeyDay, today).apply()
         scheduleMidnight(app)
     }
 
@@ -165,19 +212,20 @@ object WidgetUpdater {
     private const val MaxSizes = 10
 
     /**
-     * Следующая перерисовка — в полночь (новый день) или через [RefreshEveryMs], что раньше. Будильник
-     * без пробуждения (RTC): спящий телефон не будится, виджет обновится, когда экран включат, — ноль лишних
-     * пробуждений. Частая перерисовка нужна прошивкам вроде vivo: они не пускают к «уснувшему» приложению
-     * обычные сигналы обновления, и пересозданный лаунчером виджет иначе оставался бы пустым до запуска приложения.
+     * Перерисовка в полночь — точный будильник с пробуждением, одно пробуждение в сутки. Будильник без
+     * пробуждения vivo придерживал до утра (а то и до запуска приложения), и виджет показывал вчерашний день.
+     * Подстраховка — ежечасное обновление от самой системы (updatePeriodMillis, пробуждения система
+     * объединяет с чужими) и проверка при разблокировке, если включено постоянное уведомление.
      */
     fun scheduleMidnight(context: Context) {
-        val now = System.currentTimeMillis()
-        val midnight = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + 30_000
-        val at = minOf(midnight, now + RefreshEveryMs)
-        context.getSystemService(AlarmManager::class.java).set(AlarmManager.RTC, at, midnightIntent(context))
+        val midnight = LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + 5_000
+        val alarms = context.getSystemService(AlarmManager::class.java)
+        if (alarms.canScheduleExactAlarms()) {
+            alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, midnight, midnightIntent(context))
+        } else {
+            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, midnight, midnightIntent(context))
+        }
     }
-
-    private const val RefreshEveryMs = 3 * 60 * 60 * 1000L
 
     fun cancelMidnight(context: Context) {
         context.getSystemService(AlarmManager::class.java).cancel(midnightIntent(context))

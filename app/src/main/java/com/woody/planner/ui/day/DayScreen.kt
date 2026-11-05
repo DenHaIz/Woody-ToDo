@@ -38,6 +38,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.IntState
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -69,7 +72,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -121,7 +126,10 @@ fun DayScreen(
     val selected by vm.selected.collectAsStateWithLifecycle()
     val hazeState = LocalHazeState.current
     val density = LocalDensity.current
-    var headerHeight by remember { mutableIntStateOf(0) }
+    // Высота шапки меняется каждый кадр, пока раскрывается календарь. Её читает только измерение списка
+    // (через отступы), а не композиция — иначе три страницы дней пересобирались бы на каждом кадре.
+    val headerHeight = remember { mutableIntStateOf(0) }
+    val listPadding = remember(density, bottomInset) { HeaderPadding(density, headerHeight, bottomInset) }
 
     // Сохраняется вместе с номером страницы пейджера — после поворота страница и день совпадают.
     val baseDay = rememberSaveable { selected }
@@ -170,8 +178,7 @@ fun DayScreen(
                 DayPage(
                     day = day,
                     vm = vm,
-                    topPadding = with(density) { headerHeight.toDp() },
-                    bottomPadding = bottomInset,
+                    contentPadding = listPadding,
                     onEditTask = onEditTask,
                 )
             }
@@ -184,26 +191,27 @@ fun DayScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .onSizeChanged {
-                    headerHeight = it.height
-                    drag.headerBottom = it.height.toFloat()
-                }
+                        headerHeight.intValue = it.height
+                        drag.headerBottom = it.height.toFloat()
+                    }
                     .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
-            drag.item?.let { item ->
-                if (drag.overHeader) {
-                    val target = drag.hoverDay?.takeIf { !item.isRecurring && it != item.day }
-                    DragGhost(item, drag.pointer, target)
-                }
+            // Через derivedStateOf: экран пересобирается, только когда плашка появляется или меняется день под ней,
+            // а не на каждое движение пальца.
+            val ghost by remember { derivedStateOf { drag.item?.takeIf { drag.overHeader } } }
+            val ghostTarget by remember {
+                derivedStateOf { drag.item?.let { item -> drag.hoverDay?.takeIf { !item.isRecurring && it != item.day } } }
             }
+            ghost?.let { item -> DragGhost(item, { drag.pointer }, ghostTarget) }
         }
     }
 }
 
 /** Плашка с задачей под пальцем, пока её несут над лентой недели; с целевым днём — подсвечена. */
 @Composable
-private fun DragGhost(item: TaskItem, pointer: Offset, target: LocalDate?) {
+private fun DragGhost(item: TaskItem, pointerOf: () -> Offset, target: LocalDate?) {
     val colors = WoodyTheme.colors
     val lang = LocalLanguage.current
     val lift = with(LocalDensity.current) { 34.dp.toPx() }
@@ -213,6 +221,7 @@ private fun DragGhost(item: TaskItem, pointer: Offset, target: LocalDate?) {
             .fillMaxSize()
             .layout { measurable, constraints ->
                 val p = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                val pointer = pointerOf()
                 layout(constraints.maxWidth, constraints.maxHeight) {
                     val x = (pointer.x - p.width / 2f).coerceIn(0f, (constraints.maxWidth - p.width).toFloat().coerceAtLeast(0f))
                     p.place(x.toInt(), (pointer.y - p.height - lift).toInt().coerceAtLeast(0))
@@ -254,7 +263,14 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
     val colors = WoodyTheme.colors
     var expanded by rememberSaveable { mutableStateOf(false) }
     var month by remember { mutableStateOf(YearMonth.from(selected)) }
-    val agenda by remember(selected, today) { vm.agenda(selected) }.collectAsStateWithLifecycle(null)
+    // Общий с фоном поток выбранного дня; пока новый день не прочитан — не показываем цифры прошлого.
+    val selectedAgenda by vm.selectedAgenda.collectAsStateWithLifecycle()
+    val agenda = selectedAgenda?.takeIf { it.day == selected }
+    // День под перетаскиваемой задачей; шапка пересобирается, только когда он меняется.
+    val dragState = LocalTaskDrag.current
+    val dropTarget by remember(dragState) {
+        derivedStateOf { dragState?.let { d -> d.hoverDay?.takeIf { day -> d.item?.let { !it.isRecurring && it.day != day } == true } } }
+    }
     val chevron = animateFloatAsState(if (expanded) 180f else 0f, Motion.bouncy(), label = "headerChevron")
 
     Column(
@@ -365,9 +381,7 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
                         data
                     },
                     onSelect = vm::select,
-                    dropTarget = LocalTaskDrag.current?.let { d ->
-                        d.hoverDay?.takeIf { day -> d.item?.let { !it.isRecurring && it.day != day } == true }
-                    },
+                    dropTarget = dropTarget,
                     onDayBounds = LocalTaskDrag.current?.let { d ->
                         { day, bounds -> if (bounds == null) d.dayTargets.remove(day) else d.dayTargets[day] = bounds }
                     },
@@ -381,8 +395,7 @@ private fun DayHeader(vm: DayViewModel, selected: LocalDate, today: LocalDate, m
 private fun DayPage(
     day: LocalDate,
     vm: DayViewModel,
-    topPadding: Dp,
-    bottomPadding: Dp,
+    contentPadding: PaddingValues,
     onEditTask: (Long) -> Unit,
 ) {
     val agenda by remember(day) { vm.agenda(day) }.collectAsStateWithLifecycle(null)
@@ -439,7 +452,7 @@ private fun DayPage(
         modifier = Modifier
             .fillMaxSize()
             .onGloballyPositioned { listTop = it.positionInRoot().y },
-        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = topPadding + 8.dp, bottom = bottomPadding + 24.dp),
+        contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         if (current.isEmpty) {
@@ -615,4 +628,17 @@ private fun daySubtitle(day: LocalDate, today: LocalDate, lang: AppLanguage): St
     val delta = ChronoUnit.DAYS.between(today, day)
     val weekday = day.dayOfWeek.getDisplayName(TextStyle.FULL, lang.locale)
     return if (delta in -1L..1L) "$date, $weekday" else date
+}
+
+/** Отступы списка дня: сверху — под шапку (её высота читается при измерении, а не в композиции). */
+@Stable
+private class HeaderPadding(
+    private val density: Density,
+    private val header: IntState,
+    private val bottomInset: Dp,
+) : PaddingValues {
+    override fun calculateTopPadding(): Dp = with(density) { header.intValue.toDp() } + 8.dp
+    override fun calculateBottomPadding(): Dp = bottomInset + 24.dp
+    override fun calculateLeftPadding(layoutDirection: LayoutDirection): Dp = 14.dp
+    override fun calculateRightPadding(layoutDirection: LayoutDirection): Dp = 14.dp
 }

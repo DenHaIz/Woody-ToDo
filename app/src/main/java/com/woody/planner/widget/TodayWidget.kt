@@ -32,6 +32,7 @@ import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxHeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
@@ -60,7 +61,7 @@ import java.time.format.DateTimeFormatter
 /**
  * Виджет «Сегодня». В одну строку (5×1, как раз под поисковую строку) — счётчик дня, ближайшая
  * задача с кружком «готово» и «+». Если растянуть выше — список задач дня с галочками.
- * Обновляется только когда меняются задачи и раз в сутки после полуночи — без периодической работы.
+ * Обновляется, когда меняются задачи, в полночь и раз в час по расписанию самой системы.
  * Рисует его [WidgetUpdater] под точный размер на рабочем столе (Glance здесь — только разметка).
  */
 class TodayWidget : GlanceAppWidget() {
@@ -70,7 +71,7 @@ class TodayWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val container = (context.applicationContext as WoodyApp).container
         val today = LocalDate.now()
-        val agenda = container.repository.observeDay(today, today).first()
+        val agenda = container.repository.loadDay(today, today)
         val lang = container.settings.language.first()
         val dynamic = container.settings.dynamicColors.first()
         val mode = container.settings.themeMode.first()
@@ -129,8 +130,15 @@ private class Metrics(size: DpSize, private val fontScale: Float) {
     val gap = (button * 0.16f).coerceIn(6.dp, 12.dp)
     val checkGap = gap * 0.7f
 
+    /**
+     * Зона касания кружка «готово» — шире самого кружка (захватывает промежутки рядом) и на всю высоту строки:
+     * по маленькому кружку на рабочем столе легко промахнуться.
+     */
+    val checkStart = if (tall) 0.dp else gap
+    val checkTouch = maxOf(checkStart + check + checkGap, MinTouch)
+
     /** Место под название ближайшей задачи в однострочном виджете. */
-    val textWidth = size.width - padH * 2 - button * 2 - check - gap * 2 - checkGap
+    val textWidth = size.width - padH * 2 - button * 2 - checkTouch - gap
     val textHeight = inner
 
     /** Высота под список задач растянутого виджета (под заголовком). */
@@ -139,6 +147,8 @@ private class Metrics(size: DpSize, private val fontScale: Float) {
     /** Кегль в dp → sp: системный масштаб шрифта не должен ломать подобранную по месту вёрстку. */
     fun sp(dp: Float): TextUnit = (dp / fontScale).sp
 }
+
+private val MinTouch = 48.dp
 
 @Composable
 private fun WidgetContent(data: WidgetData, palette: WidgetPalette, lang: AppLanguage) {
@@ -163,12 +173,11 @@ private fun OneRowLayout(data: WidgetData, palette: WidgetPalette, lang: AppLang
     val next = data.open.firstOrNull()
     Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
         Counter(data, palette, m)
-        Spacer(GlanceModifier.width(m.gap))
         if (next != null) {
-            CheckCircle(next, palette, m)
-            Spacer(GlanceModifier.width(m.checkGap))
+            CheckCircle(next, data.day, palette, m)
             TitleBlock(next.title, meta(next, data, lang), palette, m, GlanceModifier.defaultWeight())
         } else {
+            Spacer(GlanceModifier.width(m.gap))
             TitleBlock(
                 if (data.total == 0) lang.pick("Свободный день", "A free day") else lang.pick("Всё сделано!", "All done!"),
                 lang.pick("Сегодня", "Today"),
@@ -235,12 +244,12 @@ private fun TallLayout(data: WidgetData, palette: WidgetPalette, lang: AppLangua
             val shown = items.take(slots)
             val rowHeight = if (fitsAll) minOf(MaxRow, m.listHeight / items.size) else (m.listHeight - MoreLine) / slots
             Column(GlanceModifier.fillMaxWidth()) {
-                shown.forEach { item -> TaskRow(item, palette, m, rowHeight) }
+                shown.forEach { item -> TaskRow(item, data.day, palette, m, rowHeight) }
                 if (shown.size < items.size) {
                     Text(
                         lang.pick("ещё ${items.size - shown.size}", "${items.size - shown.size} more"),
                         style = TextStyle(color = palette.secondary, fontSize = m.sp(15f)),
-                        modifier = GlanceModifier.padding(start = m.check + m.checkGap, top = 8.dp),
+                        modifier = GlanceModifier.padding(start = m.checkTouch, top = 8.dp),
                     )
                 }
             }
@@ -254,13 +263,12 @@ private val MaxRow = 52.dp
 private val MoreLine = 30.dp
 
 @Composable
-private fun TaskRow(item: TaskItem, palette: WidgetPalette, m: Metrics, height: Dp) {
+private fun TaskRow(item: TaskItem, shownDay: LocalDate, palette: WidgetPalette, m: Metrics, height: Dp) {
     Row(
         GlanceModifier.fillMaxWidth().height(height),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CheckCircle(item, palette, m)
-        Spacer(GlanceModifier.width(m.checkGap))
+        CheckCircle(item, shownDay, palette, m)
         Text(
             WidgetText.shorten(item.title),
             style = TextStyle(
@@ -316,43 +324,57 @@ private fun Counter(data: WidgetData, palette: WidgetPalette, m: Metrics) {
     }
 }
 
-/** Кружок-галочка: нажатие отмечает задачу прямо с рабочего стола. */
+/**
+ * Кружок-галочка: нажатие отмечает задачу прямо с рабочего стола. Зона касания — [Metrics.checkTouch]
+ * на всю высоту строки, без подсветки (стандартная рисовала квадрат вокруг этой зоны).
+ */
 @Composable
-private fun CheckCircle(item: TaskItem, palette: WidgetPalette, m: Metrics) {
+private fun CheckCircle(item: TaskItem, shownDay: LocalDate, palette: WidgetPalette, m: Metrics) {
     val toggle = actionSendBroadcast(
         Intent(WidgetUpdater.ACTION_TOGGLE)
             .setClassName("com.woody.planner", TodayWidgetReceiver::class.java.name)
             .putExtra(WidgetUpdater.EXTRA_TASK_ID, item.taskId)
             .putExtra(WidgetUpdater.EXTRA_DAY, item.day.toEpochDay())
             .putExtra(WidgetUpdater.EXTRA_DONE, !item.done)
+            .putExtra(WidgetUpdater.EXTRA_SHOWN_DAY, shownDay.toEpochDay())
             // Свои данные у каждой задачи — чтобы система не склеила кружки в один PendingIntent.
             .setData("woody://widget/toggle/${item.taskId}/${item.day.toEpochDay()}/${!item.done}".toUri()),
     )
     val circle = m.check * 0.88f
     Box(
-        GlanceModifier.size(m.check).clickable(toggle),
-        contentAlignment = Alignment.Center,
+        GlanceModifier
+            .width(m.checkTouch)
+            .fillMaxHeight()
+            .clickable(toggle, rippleOverride = R.drawable.widget_no_ripple)
+            .padding(start = m.checkStart, end = m.checkTouch - m.checkStart - m.check),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        if (item.done) {
-            Box(
-                GlanceModifier.size(circle).cornerRadius(circle / 2).background(palette.success),
-                contentAlignment = Alignment.Center,
-            ) {
-                Image(
-                    ImageProvider(R.drawable.ic_widget_check),
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(palette.onAccent),
-                    modifier = GlanceModifier.size(circle * 0.66f),
-                )
-            }
-        } else {
+        Box(GlanceModifier.size(m.check), contentAlignment = Alignment.Center) { CircleMark(item, palette, circle) }
+    }
+}
+
+/** Сам кружок: пустой или зелёный с галочкой. */
+@Composable
+private fun CircleMark(item: TaskItem, palette: WidgetPalette, circle: Dp) {
+    if (item.done) {
+        Box(
+            GlanceModifier.size(circle).cornerRadius(circle / 2).background(palette.success),
+            contentAlignment = Alignment.Center,
+        ) {
             Image(
-                ImageProvider(R.drawable.ic_widget_circle),
-                contentDescription = item.title,
-                colorFilter = ColorFilter.tint(palette.tertiary),
-                modifier = GlanceModifier.size(circle),
+                ImageProvider(R.drawable.ic_widget_check),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(palette.onAccent),
+                modifier = GlanceModifier.size(circle * 0.66f),
             )
         }
+    } else {
+        Image(
+            ImageProvider(R.drawable.ic_widget_circle),
+            contentDescription = item.title,
+            colorFilter = ColorFilter.tint(palette.tertiary),
+            modifier = GlanceModifier.size(circle),
+        )
     }
 }
 

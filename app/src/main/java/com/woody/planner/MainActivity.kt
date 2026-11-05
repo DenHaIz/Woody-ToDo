@@ -10,9 +10,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.lifecycleScope
 import com.woody.planner.data.ThemeMode
 import com.woody.planner.reminders.Notifications
+import com.woody.planner.reminders.PinnedService
 import com.woody.planner.ui.WoodyAppShell
 import com.woody.planner.ui.i18n.LocalLanguage
 import com.woody.planner.ui.theme.WoodyTheme
@@ -41,20 +41,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // После поворота или смены темы активность пересоздаётся с тем же интентом — не открываем
         // редактор и день из уведомления второй раз.
-        if (savedInstanceState == null) handleIntent(intent)
-        lifecycleScope.launch(Dispatchers.IO) {
-            // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
-            Notifications.ensureChannel(this@MainActivity, container.settings.language.first())
-            // Принудительная остановка (или «очистка» на некоторых прошивках) стирает будильники —
-            // при каждом запуске ставим их заново. Это один запрос к базе.
-            container.reminders.rescheduleAll()
-            // Виджет на рабочем столе — свежий при каждом запуске (в том числе сразу после обновления).
-            WidgetUpdater.updateNow(this@MainActivity)
+        if (savedInstanceState == null) {
+            handleIntent(intent)
+            // После первого кадра, чтобы не отнимать время у запуска; при повороте и смене темы — не повторяем.
+            window.decorView.post { container.scope.launch(Dispatchers.IO) { runCatching { startupChores() } } }
         }
         setContent {
-            val language by container.settings.language.collectAsStateWithLifecycle(null)
-            val savedMode by container.settings.themeMode.collectAsStateWithLifecycle(null)
-            val dynamicColors by container.settings.dynamicColors.collectAsStateWithLifecycle(null)
+            val language by container.language.collectAsStateWithLifecycle()
+            val savedMode by container.themeMode.collectAsStateWithLifecycle()
+            val dynamicColors by container.dynamicColors.collectAsStateWithLifecycle()
             // Пока настройки читаются (миллисекунды), показываем фон окна — без мелькания чужого языка и темы.
             val mode = savedMode ?: return@setContent
             val dynamic = dynamicColors ?: return@setContent
@@ -75,6 +70,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private suspend fun startupChores() {
+        val app = applicationContext
+        // Канал создаём сразу — он виден в системных настройках ещё до первого напоминания.
+        Notifications.ensureChannel(app, container.settings.language.first())
+        // Принудительная остановка (или «очистка» на некоторых прошивках) стирает будильники —
+        // при каждом запуске ставим их заново (и показываем те, что прошивка не доставила).
+        container.reminders.rescheduleAll()
+        // Виджет на рабочем столе — свежий при каждом запуске (в том числе сразу после обновления).
+        WidgetUpdater.updateNow(app)
+        PinnedService.ensure(app)
     }
 
     override fun onNewIntent(intent: Intent) {

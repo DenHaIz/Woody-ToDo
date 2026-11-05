@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Только то, что нужно для напоминаний. Ни интернета, ни фоновых служб. -->
+    <!-- Только то, что нужно для напоминаний. Ни интернета, ни фоновой работы. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Точные будильники: на Android 13+ USE_EXACT_ALARM выдаётся сразу (приложение-напоминалка),
          на Android 12 — SCHEDULE_EXACT_ALARM. Без них система откладывает напоминания на десятки минут. -->
@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Просьба не ограничивать приложение: часть прошивок иначе отменяет будильники закрытых приложений. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Постоянное уведомление (по желанию, в настройках): служба без фоновой работы, только держит процесс. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".WoodyApp"
@@ -52,6 +55,15 @@
         <receiver
             android:name=".reminders.ReminderReceiver"
             android:exported="false" />
+
+        <service
+            android:name=".reminders.PinnedService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Persistent daily plan notification that keeps task reminders from being frozen by the OEM battery manager" />
+        </service>
 
         <receiver
             android:name=".reminders.RescheduleReceiver"

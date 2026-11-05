@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.woody.planner.WoodyApp
-import com.woody.planner.data.toDomain
 import com.woody.planner.widget.WidgetUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,32 +41,19 @@ class ReminderReceiver : BroadcastReceiver() {
 
         runAsync {
             when (intent.action) {
-                ACTION_FIRE, ACTION_SNOOZED -> {
-                    val dao = container.database.taskDao()
-                    val task = dao.get(taskId)?.toDomain()
-                    val epochDay = day.toEpochDay()
-                    // Отложенное напоминание о задаче, которую уже отметили, не нужно.
-                    val handled = dao.completionsOf(taskId).any { it.epochDay == epochDay } ||
-                        dao.skipsOf(taskId).any { it.epochDay == epochDay }
-                    if (task != null && !handled) Notifications.show(context, task, day, container.settings.language.first())
-                    if (intent.action == ACTION_FIRE) container.reminders.schedule(taskId)
-                }
-                ACTION_MISSED -> {
-                    val dao = container.database.taskDao()
-                    val task = dao.get(taskId)?.toDomain()
-                    val epochDay = day.toEpochDay()
-                    val handled = dao.completionsOf(taskId).any { it.epochDay == epochDay } ||
-                        dao.skipsOf(taskId).any { it.epochDay == epochDay }
-                    if (task != null && !handled) {
-                        Notifications.show(context, task, day, container.settings.language.first(), missed = true)
-                    }
-                    container.reminders.schedule(taskId)
+                ACTION_FIRE, ACTION_SNOOZED, ACTION_MISSED -> {
+                    container.reminders.onAlarm(intent.action!!, taskId, day)
+                    // Процесс проснулся — заодно другие придержанные напоминания и постоянное уведомление.
+                    container.reminders.catchUp()
+                    PinnedService.ensure(context)
                 }
                 ACTION_DONE -> {
                     Notifications.cancel(context, taskId)
                     // Задачу могли удалить, пока уведомление висело.
                     if (container.database.taskDao().get(taskId) != null) {
                         container.repository.setDone(taskId, day, done = true)
+                        // Внутри приёмника, а не «потом»: замороженный после finish() процесс виджет уже не обновит.
+                        WidgetUpdater.updateNow(context)
                     }
                 }
                 ACTION_SNOOZE -> {
@@ -102,9 +88,12 @@ class RescheduleReceiver : BroadcastReceiver() {
             AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED,
             -> {
                 val container = (context.applicationContext as WoodyApp).container
-                runAsync { container.reminders.rescheduleAll() }
-                // Сменились дата или время — виджет показывает новый «сегодня».
-                WidgetUpdater.refresh(context)
+                runAsync {
+                    container.reminders.rescheduleAll()
+                    // Сменились дата или время — виджет показывает новый «сегодня».
+                    WidgetUpdater.updateNow(context)
+                    PinnedService.ensure(context)
+                }
             }
         }
     }

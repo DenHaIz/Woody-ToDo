@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -91,7 +92,11 @@ fun TaskCard(
         modifier
             .fillMaxWidth()
             .heightIn(min = if (large) 112.dp else 88.dp)
-            .graphicsLayer { this.alpha = alpha.value },
+            // ModulateAlpha: прозрачность без отдельного буфера на каждую выполненную карточку.
+            .graphicsLayer {
+                this.alpha = alpha.value
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            },
     ) {
         Column(
             Modifier
